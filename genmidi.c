@@ -80,6 +80,7 @@ extern int chordlen[MAXCHORDNAMES];
 /* these 6 arrays are used to hold the tune data */
 extern int *pitch, *num, *denom;
 extern int *bentpitch;
+extern int *decotype; /* [SS] 2012-11-25 */
 extern featuretype *feature;
 extern int *stressvelocity; /* [SS] 2011-08-17 */
 extern int notes;
@@ -225,6 +226,10 @@ extern struct trackstruct trackdescriptor[40]; /* trackstruct defined in genmidi
 /* [SS] 2011-07-04 */
 int beatmodel = 0; /* flag selecting standard or Phil's model */
 
+/* [SS] 2012-12-12 */
+int bendvelocity = 100;
+int bendacceleration = 300;
+
 /* for handling stress models */
 int nseg;       /* number of segments */
 int ngain[32];  /* gain factor for each segment */
@@ -232,6 +237,27 @@ float maxdur;   /* maximum duration */
 int segnum,segden; /* segment width computed from M: and L: parameters*/
 float fdur[32]; /* duration modifier for each segment */
 float fdursum[32]; /* for mapping segment address into a position */
+
+char *featname[] = {
+"SINGLE_BAR", "DOUBLE_BAR", "BAR_REP", "REP_BAR",
+"PLAY_ON_REP", "REP1", "REP2", "BAR1",
+"REP_BAR2", "DOUBLE_REP", "THICK_THIN", "THIN_THICK",
+"PART", "TEMPO", "TIME", "KEY",
+"REST", "TUPLE", "NOTE", "NONOTE",
+"OLDTIE", "TEXT", "SLUR_ON", "SLUR_OFF",
+"TIE", "CLOSE_TIE", "TITLE", "CHANNEL",
+"TRANSPOSE", "RTRANSPOSE", "GTRANSPOSE", "GRACEON",
+"GRACEOFF", "SETGRACE", "SETC", "SETTRIM", "GCHORD",
+"GCHORDON", "GCHORDOFF", "VOICE", "CHORDON",
+"CHORDOFF", "CHORDOFFEX", "DRUMON", "DRUMOFF",
+"DRONEON", "DRONEOFF", "SLUR_TIE", "TNOTE",
+"LT", "GT", "DYNAMIC", "LINENUM",
+"MUSICLINE", "MUSICSTOP", "WORDLINE", "WORDSTOP",
+"INSTRUCTION", "NOBEAM", "CHORDNOTE", "CLEF",
+"PRINTLINE", "NEWPAGE", "LEFT_TEXT", "CENTRE_TEXT",
+"VSKIP", "COPYRIGHT", "COMPOSER", "ARPEGGIO",
+"SPLITVOICE", "META", "PEDAL_ON", "PEDAL_OFF", "EFFECT"
+}; 
 
 void reduce(a, b)
 /* elimate common factors in fraction a/b */
@@ -484,7 +510,7 @@ int pass;
   if (gchordson) {
     if (gchordbarcount < 1) {
       g_ptr = 0;
-      addtoQ(0, g_denom, -1, g_ptr, 0);
+      addtoQ(0, g_denom, -1, g_ptr,0, 0);
       gchordbarcount = gchordbars;
       }
     gchordbarcount--;
@@ -492,7 +518,7 @@ int pass;
   if (drumson) {
     if (drumbarcount < 1) {
        drum_ptr = 0;
-       addtoQ(0, drum_denom, -1, drum_ptr, 0);
+       addtoQ(0, drum_denom, -1, drum_ptr,0, 0);
        drumbarcount = drumbars;
        }
     drumbarcount--;
@@ -868,10 +894,12 @@ int* place;
 int w;
 {
   char syllable[200];
-  char c;
+  unsigned char c; /* [BY] 2012-10-03 */
   int i;
   int syllcount;
   enum {empty, inword, postword, foundnext, failed} syllstatus;
+  /* [BY] 2012-10-03  Big5 chinese character support */
+  int isBig5; /* boolean check for first byte of Big-5: 0xA140 ~ 0xF9FE */
 
   /*printf("GETWORD: w = %d\n",c);*/
   i = 0;
@@ -894,9 +922,15 @@ int w;
   };
   syllstatus = empty;
   c = *(words[w]+(*place));
+  isBig5 = 0;  /* [BI] 2012-10-03 */
   while ((syllstatus != postword) && (syllstatus != failed)) {
   syllable[i] = c;
     /* printf("syllstatus = %d c = %c i = %d place = %d row= %d \n",syllstatus,c,i,*place,w); */
+	if (isBig5) { /* [BI] 2012-10-03 */
+      i = i + 1;
+      *place = *place + 1;
+	  isBig5 = 0;
+	} else {
     switch(c) {
     case '\0':
       if (syllstatus == empty) {
@@ -986,13 +1020,18 @@ int w;
       /* copying plain text character across */
       /* first character must be alphabetic */
 	  hyphenstate = 0;
-      if ((i>0) || isalpha(syllable[0])) {
+          /* [BI] 2012-10-03 */
+	  if (c >= 0xA1) {	/* 0xA1, 161 */
+		isBig5 = 1;
+	  };
+      if ((i>0) || isalpha(syllable[0]) || (c >= 0xA1)) {
         syllstatus = inword;
         i = i + 1;
       };
       *place = *place + 1;
       break;
     };
+};
     c = *(words[w]+(*place));
   };
   syllable[i] = '\0';
@@ -1852,6 +1891,21 @@ int noteson;
     fun.vel = readnump(&p);
     done = 1;
   };
+
+
+  /* [SS] 2012-12-12 */
+  if (strcmp(command, "bendvelocity") == 0) {
+    bendvelocity = bendacceleration = 0;
+    skipspace(&p);
+    val = readsnump(&p);
+    bendvelocity = val;
+    skipspace(&p);
+    val = readsnump(&p);
+    bendacceleration = val;
+    done = 1;
+    }
+
+
   if (strcmp(command, "drone") == 0) {
     skipspace(&p);
     val = readnump(&p);
@@ -2082,9 +2136,9 @@ int pitch, pitchbend, chan, vel;
 {
 /* don't transpose drum channel */
   if(chan == 9) {noteon_data(pitch, pitchbend, chan, vel);
-                addtoQ(num, denom, pitch, chan, -1);}
+                addtoQ(num, denom, pitch, chan,0, -1);}
   else  {noteon_data(pitch + transpose + global_transpose, pitchbend, chan, vel);
-        addtoQ(num, denom, pitch + transpose + global_transpose, chan, -1);}
+        addtoQ(num, denom, pitch + transpose + global_transpose, chan,0, -1);}
 }
 
 
@@ -2189,7 +2243,7 @@ int j;
 
 
     g_ptr = g_ptr + 1;
-    addtoQ(g_num*len, g_denom, -1, g_ptr, 0);
+    addtoQ(g_num*len, g_denom, -1, g_ptr,0, 0);
     };
 };
 
@@ -2213,7 +2267,7 @@ int i;
       };
     };
     drum_ptr = drum_ptr + 1;
-    addtoQ(drum_num*len, drum_denom, -1, drum_ptr, 0);
+    addtoQ(drum_num*len, drum_denom, -1, drum_ptr,0, 0);
   };
 }
 
@@ -2401,7 +2455,7 @@ static void starttrack()
     channel = 0;
   };
   if (gchordson) {
-    addtoQ(0, g_denom, -1, g_ptr, 0);
+    addtoQ(0, g_denom, -1, g_ptr,0, 0);
     fun.base = 36;
     fun.vel = 80;
     gchord.base = 48;
@@ -2415,7 +2469,7 @@ static void starttrack()
   };
   if (drumson) {  /* [SS] 2010-08-12 */
        drum_ptr = 0;
-       addtoQ(0, drum_denom, -1, drum_ptr, 0);
+       addtoQ(0, drum_denom, -1, drum_ptr,0, 0);
        }
   if (droneon) {
     drone.event =0;
@@ -2520,6 +2574,7 @@ int xtrack;
   int note_num,note_denom;
   int tnote_num,tnote_denom; /* for note trimming */
   int graceflag;
+  int effecton;  /* [SS] 2012-12-11 */
 
 /*  printf("writing track %d\n",xtrack); */
 
@@ -2549,6 +2604,7 @@ int xtrack;
   gchordbars = 1;
   drumbarcount=0;
   gchordbarcount=0;
+  effecton=0;  /* [SS] 2012-12-11 */
   if (karaoke) {
     if (xtrack == 0)                  
        karaokestarttrack(xtrack);
@@ -2656,6 +2712,7 @@ int xtrack;
   was_slurring = 0; /* [SS] 2011-11-30 */
   expect_repeat = 0;
   while (j < notes) {
+    if (verbose >4) printf("%d %s\n",j,featname[feature[j]]); /* [SS] 2012-11-21*/
     switch(feature[j]) {
     case NOTE:
 	onemorenote = 0;
@@ -2677,7 +2734,7 @@ int xtrack;
         noteon(j);
         /* set up note off */
        if (channel == 9) 
-        addtoQ(num[j], denom[j], drum_map[pitch[j]], channel, -totalnotedelay -1);
+        addtoQ(num[j], denom[j], drum_map[pitch[j]], channel, 0, -totalnotedelay -1);
         else {
             if ((notecount > 1) && ((note_num * denom[j]) !=  (note_denom * num[j])))
                {
@@ -2698,14 +2755,14 @@ int xtrack;
               if (gtfract(note_num,note_denom,trim_num,trim_denom))
                 addfract(&tnote_num,&tnote_denom,-trim_num,trim_denom);
               addtoQ(tnote_num, tnote_denom, pitch[j] + transpose +global_transpose,
-               channel, -totalnotedelay -1);
+               channel,effecton, -totalnotedelay -1); /* [SS] 2012-12-11 */
         /*     else
                 addfract(&note_num,&note_denom,-note_num,trim_denom*2); */
                 /* no note trimming for short notes 2006-08-05 at
                    Hudson Lacerda's request.                             */
                } else
             addtoQ(note_num, note_denom, pitch[j] + transpose +global_transpose,
-               channel, -totalnotedelay -1);
+               channel, 0, -totalnotedelay -1);
              }
 };
       if (!inchord) {
@@ -2714,6 +2771,7 @@ int xtrack;
         notecount =0;
         totalnotedelay=0;
       };
+      effecton = 0;  /* [SS] 2012-12-11 */
       break;
     case TNOTE:
 	onemorenote = 1;
@@ -2730,8 +2788,8 @@ int xtrack;
         noteon(j);
         /* set up note off */
        if (channel == 9) 
-        addtoQ(num[j], denom[j], drum_map[pitch[j]], channel, -totalnotedelay -1);
-        else addtoQ(num[j], denom[j], pitch[j] + transpose +global_transpose, channel, -totalnotedelay -1);
+        addtoQ(num[j], denom[j], drum_map[pitch[j]], channel, 0, -totalnotedelay -1);
+        else addtoQ(num[j], denom[j], pitch[j] + transpose +global_transpose, channel, 0, -totalnotedelay -1);
       };
       break;
     case OLDTIE:
@@ -3103,6 +3161,10 @@ int xtrack;
     case PEDAL_OFF: /* [SS] 2011-10-19 */
        pedal_off();
        break;
+
+    case EFFECT: 
+       effecton = 1;  /* [SS] 2012-12-11 */
+       break;
     
     default:
       break;
@@ -3129,26 +3191,6 @@ int xtrack;
 }
 
 
-char *featname[] = {
-"SINGLE_BAR", "DOUBLE_BAR", "BAR_REP", "REP_BAR",
-"PLAY_ON_REP", "REP1", "REP2", "BAR1",
-"REP_BAR2", "DOUBLE_REP", "THICK_THIN", "THIN_THICK",
-"PART", "TEMPO", "TIME", "KEY",
-"REST", "TUPLE", "NOTE", "NONOTE",
-"OLDTIE", "TEXT", "SLUR_ON", "SLUR_OFF",
-"TIE", "CLOSE_TIE", "TITLE", "CHANNEL",
-"TRANSPOSE", "RTRANSPOSE", "GTRANSPOSE", "GRACEON",
-"GRACEOFF", "SETGRACE", "SETC", "SETTRIM", "GCHORD",
-"GCHORDON", "GCHORDOFF", "VOICE", "CHORDON",
-"CHORDOFF", "CHORDOFFEX", "DRUMON", "DRUMOFF",
-"DRONEON", "DRONEOFF", "SLUR_TIE", "TNOTE",
-"LT", "GT", "DYNAMIC", "LINENUM",
-"MUSICLINE", "MUSICSTOP", "WORDLINE", "WORDSTOP",
-"INSTRUCTION", "NOBEAM", "CHORDNOTE", "CLEF",
-"PRINTLINE", "NEWPAGE", "LEFT_TEXT", "CENTRE_TEXT",
-"VSKIP", "COPYRIGHT", "COMPOSER", "ARPEGGIO",
-"SPLITVOICE", "META", "PEDAL_ON", "PEDAL_OFF"
-}; 
 
 void dumpfeat (int from, int to)
 {
@@ -3156,7 +3198,8 @@ int i,j;
 for (i=from;i<=to;i++)
   {
   j = feature[i]; 
-  printf("%d %s   %d %d %d %d \n",i,featname[j],pitch[i],bentpitch[i],num[i],denom[i]);
+  if (j<0 || j>73) printf("illegal feature[%d] = %d\n",i,j); /* [SS] 2012-11-25 */
+  else printf("%d %s   %d %d %d %d %d \n",i,featname[j],pitch[i],bentpitch[i],decotype[i],num[i],denom[i]);
   }
 }
 

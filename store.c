@@ -31,7 +31,7 @@
  * Wil Macaulay (wil@syndesis.com)
  */
 
-#define VERSION "2.93 Aug 08 2012"
+#define VERSION "3.09 April 24 2013"
 /* enables reading V: indication in header */
 #define XTEN1 1
 /*#define INFO_OCTAVE_DISABLED 1*/
@@ -125,11 +125,16 @@ int retuning = 0; /* [SS] 2012-04-01 */
 int bend = 8192; /* [SS] 2012-04-01 */
 
 struct voicecontext {
+/* not to be confused with struct voice defined in struct.h and
+   used only by yaps.
+*/
   /* maps of accidentals for each stave line */
   char basemap[7], workmap[7][10];
   int  basemul[7], workmul[7][10];
   int  keyset; /* flag to indicate whether key signature set */
   int default_length;
+  int active_meter_num; /* [SS] 2012-11-08 */
+  int active_meter_denom; /* [SS] 2012-11-08 */
   int voiceno; /* voice number referenced by V: command. To avoid
                   conflicts with split voices, all split voices
                   begin from 32. */
@@ -295,6 +300,8 @@ int header_time_num,header_time_denom;
 int dummydecorator[DECSIZE]; /* used in event_chord */
 extern char* featname[];
 
+char *csmfilename = NULL;  /* [SS] 2013-04-10 */
+
 void addfract(int *xnum, int *xdenom, int a, int b);
 static void zerobar();
 static void addfeature(int f,int p,int n,int d);
@@ -331,6 +338,10 @@ int n;
   s->topvoiceno = n;
   s->topindexno = voicecount;
   s->default_length = global.default_length;
+  s->active_meter_num = time_num;     /* [SS] 2012-11-08 */
+  s->active_meter_denom = time_denom; /* [SS] 2012-11-08 */
+  mtime_num = time_num;     /* [SS] 2012-11-08 */
+  mtime_denom = time_denom; /* [SS] 2012-11-08 */
   s->hasgchords = 0;
   s->haswords = 0;
   s->hasdrums = 0;
@@ -360,6 +371,8 @@ int n;
   s->keyset = global.keyset;
   s->octaveshift = global.octaveshift;
   s->drumchannel = 0;
+  if (voicecount < 0 || voicecount >63)
+     printf("illegal voicecount = %d\n",voicecount); /* [SS] 2012-11-25 */
   vaddr[voicecount] = s;
   return(s);
 }
@@ -401,6 +414,8 @@ int n;
         }
       };
     }
+  mtime_num = p->active_meter_num; /* [SS] 2012-11-08 */
+  mtime_denom = p->active_meter_denom; /* [SS] 2012-11-08 */
   return(p);
 }
 
@@ -753,6 +768,8 @@ char **filename;
   decotype  = checkmalloc(maxnotes*sizeof(int)); /* [SS] 2012-06-29 */
   feature = (featuretype*) checkmalloc(maxnotes*sizeof(featuretype));
   pitchline = checkmalloc(maxnotes*sizeof(int));
+  for (j=0; j<maxnotes; j++)           /* [SS] 2012-11-25 */
+       bentpitch[j] = decotype[j] = 0; /* [SS] 2012-11-25 */
   for (j=0;j<DECSIZE;j++)  dummydecorator[j] = 0;
 
   /* and for text */
@@ -782,6 +799,7 @@ char **filename;
     printf("        -BF Barfly mode: invokes a stress model if possible\n");
     printf("        -OCC old chord convention (eg. +CE+)\n");
     printf("        -TT tune to A =  <frequency>\n");
+    printf("        -CSM <filename> load custom stress models from file\n");
     printf(" The default action is to write a MIDI file for each abc tune\n");
     printf(" with the filename <stem>N.mid, where <stem> is the filestem\n");
     printf(" of the abc file and N is the tune reference number. If the -o\n");
@@ -852,7 +870,22 @@ outbase = addstring(argv[1]); /* [RM] 2010-11-21 */
     } else {
       event_error("No filename given, ignoring -o option");
     };
-  };
+  }
+
+/* [SS] 2013-04-10 */
+  j = getarg("-CSM", argc, argv);
+  if (j != -1) {
+    if (argc >= j+1) {
+      csmfilename = addstring(argv[j]);
+      if (*csmfilename == '-') {
+        event_error("csmfilename confused with options");
+        csmfilename = NULL;
+       }
+  } else {
+     event_error("Filename required after -CSM option");
+     } 
+ }
+
   ratio_standard = getarg("-RS", argc, argv);
   quiet  = getarg("-quiet", argc, argv);
   dotune = 0;
@@ -1250,6 +1283,10 @@ int maxnotes;
   ptr2 = checkmalloc(newlimit*sizeof(int));
   ptr3 = checkmalloc(newlimit*sizeof(int));
   ptr4 = checkmalloc(newlimit*sizeof(int)); /* [SS] 2012-06-29 */
+  for (i=0; i<newlimit; i++) {
+      ptr3[i] = 0;
+      ptr4[i] =0;
+      }      
   for(i=0;i<maxnotes;i++){
     ptr[i] = pitch[i];
     ptr2[i] = pitchline[i];
@@ -2331,9 +2368,21 @@ int n, m, dochecking;
   if (dotune) {
     if (pastheader) {
       addfeature(TIME, dochecking, n, m);
+      mtime_num = n; /* [SS] 2012-11-03 */
+      mtime_denom = m; /* [SS] 2012-11-03 */
+      if (v != NULL) {
+        v->active_meter_num =  n; /* [SS] 2012-11-08 */
+        v->active_meter_denom =  m; /* [SS] 2012-11-08 */
+        }
     } else {
       time_num = n;
       time_denom = m;
+      mtime_num = n; /* [SS] 2012-11-03 */
+      mtime_denom = m; /* [SS] 2012-11-03 */
+      if (v != NULL) {
+        v->active_meter_num =  n; /* [SS] 2012-11-08 */
+        v->active_meter_denom =  m; /* [SS] 2012-11-08 */
+        }
       timesigset = 1;
       barchecking = dochecking;
     };
@@ -2586,7 +2635,8 @@ static void lenmul(n, a, b)
 int n, a, b;
 {
   if ((feature[n] == NOTE) || (feature[n] == REST) || 
-      (feature[n] == CHORDOFF)) {
+      (feature[n] == CHORDOFF)
+       || (feature[n] == CHORDOFFEX)) /* [SS] 2013-04-20 */ {
     num[n] = num[n] * a;
     denom[n] = denom[n] * b;
     reduce(&num[n], &denom[n]);
@@ -2748,7 +2798,9 @@ int n, m;
 /* it is not legal to pass a fermata to a multirest */
 
   for (i=0; i<n; i++) {
-    event_rest(decorators,time_num*(v->default_length), time_denom,0);
+    /* [SS] 2012-11-03 */
+    /*event_rest(decorators,time_num*(v->default_length), time_denom,0);*/
+    event_rest(decorators,mtime_num*(v->default_length), mtime_denom,0);
     if (i != n-1) {
       event_bar(SINGLE_BAR, "");
     };
@@ -2799,11 +2851,12 @@ void event_chordoff(int chord_n, int chord_m)
         tnote_num   = c_n;
         tnote_denom = c_m;
     } else {
-       if (tnote_num * c_m != c_n * tnote_denom) {
+    /*   if (tnote_num * c_m != c_n * tnote_denom) {
           if (!specialtuple) {
             event_warning("Different length notes in tuple for chord");
            };
         };
+      [SS] 2013-04-24 */
      }
      if ((!gracenotes) && (!v->inchord)) {
         tuplecount = tuplecount - 1;
@@ -3027,6 +3080,8 @@ int pitch;
   s->bendup = bend_up;
   s->benddown = bend_down;
   s->default_length = global.default_length;
+  if (notesdefined < 0 || notesdefined>999)
+      printf("illegal notesdefined = %d\n",notesdefined);
   noteaddr[notesdefined] = s;
   if (notesdefined < 1000) notesdefined++;
 }
@@ -3140,6 +3195,8 @@ int pitch;
   s->default_length = global.default_length;
   s->bendup = bend;
   s->benddown = active_pitchbend;
+  if (notesdefined < 0 || notesdefined>999)
+      printf("illegal notesdefined = %d\n",notesdefined);
   noteaddr[notesdefined] = s;
   if (notesdefined < 1000) notesdefined++;
   }
@@ -3412,6 +3469,9 @@ int xoctave, n, m;
   if ((decorators[ROLL]) || (decorators[ORNAMENT]) || (decorators[TRILL])) {
     if (v->inchord) {
       event_error("Rolls and trills not supported in chords");
+      pitchline[notes] = pitch_noacc; /* [SS] 2013-03-26 */
+      bentpitch[notes] = active_pitchbend; /* [SS] 2013-03-26 */
+      addfeature(NOTE, pitch, num*4, denom*2*(v->default_length)); /* [SS] */
     } else {
       if (easyabcmode) /* [SS] 2011-07-18 */ 
          addfeature(META,0,lineno,lineposition); /* [SS] 2011-07-18 */
@@ -3708,6 +3768,11 @@ if (nofnop == 0) {
     done = 1;
     };
 
+ if (strcmp(s, "bend") == 0) {   /* [SS] 2012-12-11 */
+   addfeature(EFFECT, 1, 0, 0);
+   done = 1;
+  };
+
   if (done == 0) {
     sprintf(buff, "instruction !%s! ignored", s);
     event_warning(buff);
@@ -3957,7 +4022,7 @@ int j, xinchord,voiceno;
       event_error("Could not find note to be tied");
     };
   };
-/*printf("dotie finished\n");*/ 
+/*if (verbose > 3) printf("dotie finished\n"); */
 }
 
 static void fix_enclosed_note_lengths(int from, int end) 
@@ -4063,6 +4128,7 @@ static void tiefix()
       break;
     };
   };
+if (verbose >3) printf("tiefix finished\n");
 }
 
 static void applygrace_orig(int);
@@ -4331,6 +4397,7 @@ static void dograce()
     };
     j = j + 1;
   };
+if (verbose >3) printf("dograce finished\n");
 }
 
 static void zerobar()
@@ -4899,9 +4966,11 @@ voicenum = 0;
 clear_voice_repeat_arrays(); /* [SS] 2012-03-22 */
 for (i=0;i<notes;i++) {
   j = feature[i];
-  if (j == PART || j == VOICE || j == BAR_REP || j == REP_BAR
-     || j == DOUBLE_REP) 
-  if (j == PART) {clear_voice_repeat_arrays();
+  /*if (j == PART || j == VOICE || j == BAR_REP || j == REP_BAR
+     || j == DOUBLE_REP) [SS] 2013-03-14 */
+  /* if (j == PART) [SS] 2013-03-14 */
+  if (j == PART && parts != -1) /* [SS] 2013-03-14 */
+                 {clear_voice_repeat_arrays();
                   part = (char) pitch[i];
                   voicestart[0] = i;
                  }
@@ -4920,7 +4989,7 @@ for (i=0;i<notes;i++) {
   }
 if (num2add > 0) 
  add_missing_repeats (); 
-
+if (verbose >3) printf("scan_for_missing_repeats finished\n");
 }
 
 
@@ -4937,12 +5006,37 @@ for (i = num2add-1; i >= 0; i--) {
   }
 }
 
-/* [SS] 2012-05-30 */
+/* [SS] 2012-11-23 */
+void convert_tnote_to_note (int loc) {
+/* tied notes TNOTE are handled in a different
+   manner by genmidi so we need to change it
+   to NOTE so it expand_ornament can process
+   it. We change TNOTE to NOTE and eliminate the
+   RESTS associated with TNOTE
+*/
+int i,j,pitchflag;
+feature[loc] = NOTE;
+/* Look ahead and remove the REST associated with TNOTE    */
+/* The last REST in the TNOTE sequence has a nonzero pitch */
+j=loc;
+for (i=0;i<6;i++) {
+  if(feature[j] == REST) {
+    pitchflag = pitch[j];
+    removefeature(j);
+    if (pitchflag != 0) break;
+    } else j++; 
+  }
+}
+
+
+
+/* [SS] 2012-05-30  2012-11-23 */
 void expand_ornaments () {
 int i;
 struct notestruct *s;
 int notetype,deco_index;
 for (i=0;i<notes;i++) {
+  if (decotype[i] != 0 && feature[i] == TNOTE) convert_tnote_to_note(i);
   if (decotype[i] != 0 && feature[i] == NOTE) {
       deco_index = decotype[i];
       s =  noteaddr[deco_index];
@@ -4959,7 +5053,23 @@ for (i=0;i<notes;i++) {
       }
   }
 /*dump_notestruct();*/
+if (verbose> 3) printf("expand_ornaments finished\n");
  }
+
+/* [SS] 2012-12-25 */
+void fix_part_start () 
+/* update part_start array in case things have moved around */
+{
+int i;
+int partnum;
+for (i=0;i<notes;i++) {
+  if (feature[i] == PART) {
+    /*printf("%d PART %d\n",i,pitch[i]); */
+    partnum = pitch[i]-65;
+    if (partnum >= 0 && partnum < 26) part_start[partnum] = i;
+    }
+  }
+}
 
 
 
@@ -5002,6 +5112,8 @@ static void finishfile()
     if (barflymode) apply_bf_stress_factors (); /* [SS] 2011-08-24 */ 
  
     expand_ornaments();
+    if (parts >= 0) fix_part_start(); /* [SS] 2012-12-25 */
+    if (verbose > 5) dumpfeat(0,notes);
 
     if (check) {
       Mf_putc = nullputc;
@@ -5142,8 +5254,9 @@ char *argv[];
 
   for (i=0;i<DECSIZE;i++) decorators_passback[i]=0;
   for (i=0;i<64;i++) dependent_voice[i]=0;
-
   event_init(argc, argv, &filename);
+  /* [SS] 2013-04-10 */
+  if (csmfilename != NULL) read_custom_stress_file(csmfilename);
   if (argc < 2) {
     /* printf("argc = %d\n", argc); */
   } else {

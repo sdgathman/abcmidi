@@ -1,10 +1,10 @@
 abcMIDI :   abc <-> MIDI conversion utilities
 
 midi2abc version 2.92 Aug  04 2008
-abc2midi version 2.93 Aug  08 2012
-abc2abc  version 1.68 Aug  08 2012
-yaps     version 1.53 Aug  08 2012
-abcmatch version 1.43 Aug  08 2012
+abc2midi version 3.09 April 24 2013
+abc2abc  version 1.74 April 21 2013
+yaps     version 1.54 April 21 2013
+abcmatch version 1.54 April 30 2013
 midicopy version 1.10 Sep  22 2006
 
 24th January 2002
@@ -14,7 +14,7 @@ J.R.Allwright@westminster.ac.uk
 University of Westminster,
 London, UK
 
-July 2011
+April 2013
 
 Seymour Shlien
 seymour.shlien@crc.ca
@@ -255,6 +255,8 @@ Usage : abc2midi <abc file> [reference number] [-c] [-v] [-o filename]
         -ver prints version number and exits
         -BF Barfly mode: invokes a stress model if possible
         -OCC old chord convention (eg. +CE+)
+        -TT tune to A = <frequency>
+        -CSM <filename> load custom stress models from file
 
  The default action is to write a MIDI file for each abc tune
  with the filename <stem>N.mid, where <stem> is the filestem
@@ -342,8 +344,8 @@ Usage: abc2abc <filename> [-s] [-n X] [-b] [-r] [-e] [-t X]
   -u to update notation ([] for chords and () for slurs)
   -d to notate with doubled note lengths
   -v to notate with halved note lengths
-  -V X to output only voice X
-  -P X restricts action to voice X, leaving other voices intact
+  -V X[,Y...] to output only voice X,Y...
+  -P X[,Y...] restricts action to voice X,Y... leaving other voices intact
   -ver prints version number and exits
   -X n renumber the all X: fields as n, n+1, ..
   -usekey sf Use key signature sf (flats/sharps)

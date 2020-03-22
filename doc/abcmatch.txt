@@ -104,8 +104,8 @@ Here is now an explanation of the program and its run time
 parameters.  If you run abcmatch without any parameters you
 will see:
 
-abcmatch version 1.28
-Usage : abcmatch <abc file> [reference number] [-options]
+abcmatch version 1.32
+Usage : abcmatch <abc file> [-options]
         [reference number] selects a tune
         -c returns error and warning messages
         -v selects verbose option
@@ -116,9 +116,12 @@ Usage : abcmatch <abc file> [reference number] [-options]
         -ign ignore simple bars
         -br %d only report number of matched bars when
             above given threshold
+        -tp <abc file> [reference number]
         -ver returns version number
         -pitch_hist pitch histogram
+        -wpitch_hist interval weighted pitch histogram
         -length_hist pitch histogram
+        -pitch_table separate pitch pdfs for each tune
 
 
 When running this program, you must provide the name of the abc file name
@@ -133,6 +136,17 @@ from runabc).
 
 All the remaining parameters (-r -con -a -br) control the matching
 process.
+
+The option -norhythm, causes the matching algorithm to ignore
+the length of notes in a bar, thus E3/2F/D GA2 would match
+EFD G2A. The option ignores -r parameter since it is now
+irrelevant.
+
+The option -pitch_table is used to produce a interval weighted
+pitch histogram for each tune in the file. If this is saved
+in an external file, that file could be used as a database
+for finding tunes with similar pitch probability density functions
+(pdf).
 
 The -r parameter controls how the matching criterion handles
 small rhythm variations in the melody.  The -r option must be
@@ -174,10 +188,17 @@ The -qnt option will use the contour matching algorithm
 but also quantize the intervals using the following table
 
 unison and semitone    0
-major 2nd to major 3rd 1
-perfect 4 and greater  2
+minor 2nd to major 2nd 1
+minor 3rd to major 3rd 2
+any larger interval    3
 
 negative numbers are descending intervals.
+
+The -tp followed by a file name and reference number
+allows you to substitute any tune for the template match.abc.
+When using this feature, the entire tune is used as a
+template. Abcmatch does not match the template with itself,
+and only bars which match bars in other tunes are reported.
 
 The -br followed by a threshold, runs the program in a brief
 mode designed to identify groups of tunes sharing common bars.

@@ -8770,7 +8770,7 @@ it is creating the midi file lamb2.mid. In most cases the position
 of the missing left repeat |: can be inferred, (in particular if
 it is at the beginning of the tune). However, in some cases the
 missing repeat is put at the wrong place or abc2midi fails to
-apply the repeat. In July 23 2009 new code was introduced to 
+apply the repeat. In June 23 2009 new code was introduced to 
 address this problem since it is proper for the left repeat to be
 omitted when it should occur at the beginning of the tune. 
 The new functions scan_for_missing_repeats(), add_missing_repeats(),
@@ -8887,7 +8887,7 @@ Abc2midi: new feature. Introduced a new option (-TT)  to tune the key of
 A above or below 440.0 Hz but less than a semitone. The output MIDI
 file will re-tune to that frequency. The purpose of this feature
 is to accommodate some instruments like the accordian which are
-not tune exactly to 440.0 Hz.
+not tuned exactly to 440.0 Hz.
 
 Implementation: in store.c introduced two new globals
 retuning and bend which will be shared with genmidi.c.
@@ -9137,4 +9137,584 @@ interpreted as 2/2 instead of 4/4.
 
 Implementation: added another test in void readsig() in parseabc.c
 
+
+October 03 2012
+
+Chinese character support in lyrics was added to abc2midi by
+Bow Yi Jang <byjang61@gmail.com>. Changes were restricted to
+the function getword(.) in genmidi.c
+
+
+November 03 2012
+
+Abc2midi multirest bug. In the following example,
+
+X:1
+T: multirest problem
+M: 2/4
+L: 1/8
+K: G
+Z|G4|\
+M:3/4
+L:1/8
+Z|D6|
+
+The second multirest preceding D6 is held for two beats instead of
+three and the warning
+Warning in line 9 : Bar 2 has 2 units instead of 3
+appears.
+
+Analysis: the function event_mrest (store.c)  uses the initial time
+signature 2/4 stored in time_num/time_denom which does not get updated by
+event_timesig() once the parser is in the body. abc2midi must keep
+track of two time signatures: time_num/time_denom which is declared in
+the initial field commands and mtime_num/mtime_denom which may be
+updated in the middle of the body. The initial time signature, is
+important for multivoiced tunes where the initial declaration is carried
+to the start of all the voices. The active time signature
+mtime_num/mtime_denom is only updated in the second stage in
+set_meter() when genmidi is processing the feature[] array and
+writing the MIDI tracks. However, the active time signature is
+also needed when event_mrest is called to write multiple bars
+of rests. Unfortunately, the active time signature was not maintained
+during the initial parsing stage (first stage).
+
+Fix: the variables mtime_num and mtime_num are now also used
+during the first pass and maintained in event_timesig(). event_mrest()
+uses the active time signature mtime_num/mtime_denom rather than
+the initial time signature time_num/time_denom.
+
+
+November 08 2012
+
+Abc2midi: multirest bug part 2. The problem with meter change and
+multirests persists in multivoiced tunes. In the following example,
+
+X:1
+T: Multirest bug part 2
+M:C
+L:1/4
+K:F
+V: 1
+V: 2
+%%MIDI program 1 73
+%%MIDI program 2 40
+%%staves [{ 1  2 }]
+[V: 1] F A z c| z4 | [M:3/8][L:1/8] F/>G/ FA|B/>c/ BA | G/>A/ GF|C3|]
+[V: 2] A F3   | Z | [M:3/8][L:1/8] Z | G/>A/ GA | B/>c/ BA | G3|]
+
+The first multirest Z in voice 2 is held for 3/8 instead of of 1/4.
+
+Analysis: voice 1 changes mtime_num/mtime_denom to 3/8 and it
+remains in that state at the start of voice 2.
+
+Fix: new variables int active_meter_num, active_meter_denom are
+introduced into the voicecontext struct. They are used to maintain
+the values of mtime_num and mtime_denom over voice switches.
+
+
+November 15 2012
+
+Abc2midi extension: abc2midi treats Xn the same way as Zn, to be
+compatible with the new version of abcm2ps. Fix in parseabc.c added
+case 'X': /* [SS] 2012-11-15 */
+after case 'Z':
+
+
+November 21 2012
+
+Abc2midi: verbose option provides more detail if set to 4 or 5 for
+tracking segmentation errors.
+
+
+
+November 22 2012
+
+The fixes for the following two problems were provided
+by Philippe De Muyter.
+
+The input line size in parseabc.c was increased from 256 to 512
+to accommodate abc files that are automatically generated (eg midi2abc).
+char inputline[512];
+
+
+Abc2abc truncates the voice ids when it encounters the first
+invalid character without giving any warning. eg.
+
+X:1
+T: invalid voice
+M: 2/4
+L: 1/8
+K: G
+V: A_1
+abcd|
+V: A_2
+DEFG|
+
+only one voice is detected.
+
+Fix:
+In interpret_voicestring() in parseabc.c the following code was added
+after c = readword(code,s);
+
+if (*c != '\0' && *c != ' ' && *c != ']') {
+     sprintf(msg, "invalid character `%c' in Voice ID", *c);
+     event_error(msg);
+    }
+
+Now abc2abc and abc2midi complain that they encountered an invalid
+character.
+
+
+November 23 2012
+
+abc2midi bug: unable to trill or roll tied notes. In the following
+example
+
+X:1
+T:trill-issue
+M:2/4
+L:1/8
+K:F
+V: 1
+z4|z3d|
+V: 2
+%%MIDI program 1 73
+%%MIDI program 2 40
+ TF2   Tc2-| c Tf2-f|
+
+The tied notes c2-c and f2-f do not get trilled.
+
+Analysis: this bug was introduced on July 03 2012 in the attempt
+to fix other problems associated with trills. The function
+expand_ornaments() only processes NOTE features and ignores
+TNOTE features used to designate tied notes.
+
+Fix: The solution is to change TNOTE to a NOTE. However,
+writetrack() in genmidi.c processes TNOTE features in a special way
+in order that checkbar() will work when a tied note extends
+over a measure. The TNOTE invokes a midi on command but a midi
+off command is deduced from the following REST(s) which are
+associated with the tied note. Therefore, if we change TNOTE
+to a NOTE we also need to eliminate the REST(s) which are
+part of the TNOTE sequence. This is done by a new function,
+convert_tnote_to_note(). Unfortunately, this is not a clean fix.
+Checkbar() will give a misleading message when the tied note
+extends over a measure. Also, lyrics may not align correctly
+with tied and trilled notes. It gets messy to make expand_ornaments()
+to split up a trill across a measure.
+
+
+November 25 2012
+
+Abc2midi: the compiler on Windows PC does not initialize arrays
+to zero when they are allocated. As a protection the arrays the bentpitch
+and decotype are now initialized to 0 when they are allocated.
+Some array pointers are now checked for valid values.
+
+
+December 01 2012 -- submitted by Philippe de Muyter
+
+abc2abc truncates a line to 512 characters without warning in the
+-P mode. (This is the continuation of the changes November 22 2012.)
+
+Analysis event_error is muted during the output so it is necessary
+to simulate it with a plain printf in the function print_inputline_nolinefeed()
+in the file parseabc.c.
+
+December 11 2012
+
+abc2midi: bend note, new feature. Placing the instruction !bend! slides
+the pitch of the following note up.
+
+For examples:
+
+X:1
+T: pitchbend
+M: 6/8
+L: 1/8
+K: Gdor
+%%MIDI program 78 whistle
+%%MIDI transpose 12
+DEF G3|DEF !bend!G3|
+
+the second G is slid up.
+
+
+Implementation: added a new function note_effect to queues.c which
+is called by timestep(). Note effect inserts a sequence of pitch bend
+events prior to sending a MIDI note off. Added a new integer member,
+effect, to struct Qitem. The flag, effect, determines whether note_effect
+is invoked. An additional parameter, effect, was added to the function
+addtoQ which is also defined in queues.c. The function addtoQ is called
+in many places in genmidi.c. In abc.h added a new feature called
+EFFECT. The feature is inserted before a note when the instruction
+!bend! is encountered --  see event_handle_instruction() in store.c. 
+In genmidi.c added a global flag, effecton, which is usually set to
+zero except when the EFFECT feature is encountered. The NOTE: handler
+in writetrack returns effecton in one of the addtoQ function
+calls.
+
+
+December 12 2012
+
+abc2midi: bend configuration. Introduced two variables bendvelocity and
+bendacceleration into note_effect. Note_effect inserts 8 MIDI pitchbends
+equally spaced inside a note. The pitchbend is initialized to the neutral
+value of 8192. During the loop repeated 8 times, pitchbend and 
+bandvelocity are incremented as follows.
+
+pitchbend = pitchbend + bendvelocity
+bendvelocity = bendvelocity + bendacceleration.
+
+The pitchbend is limited between 0 and 16383 usually corresponding
+to a negative and positive shift of two semitones on most General
+MIDI instruments.
+
+The variables bendvelocity and bendacceration can be set by the 
+following  %%MIDI command.
+
+%%MIDI bendvelocity n1 n2
+
+where the integers n1 and n2 are the velocities and acceleration
+respectively.  By default, n1 and n2 are initialized to 100 and 200.
+
+
+December 25 2012
+
+Abc2midi part/trill bug. Introducing trills or ornaments in a
+multipart abc file causes erratic behaviour. For example,
+
+X:1
+T:parts
+M:2/4
+L:1/8
+P:B
+K:C
+P:A
+CDEF|TGABc|
+P:B
+cBAG|FEDC|
+
+Part B is not played when the trill is present in part A.
+
+Analysis, abc2midi stores the start position of each part in
+the array part_start during the parsing stage. Unfortunately,
+things may move around during the later stages. The function
+expand_ornaments() inserts additional notes in the feature
+arrays when it does its expansion. This shifts the position
+of the parts and the information in the part_start array is
+no longer valid.
+
+Fix: created a new function fix_part_start() in store.c which
+is called after expand_ornaments() in finishfile().
+
+
+Jan 27 2013
+
+Abc2midi: the abc2midi allows but does not recommend the tempo
+command to just specify a number. eg. Q:320. abc2midi automatically
+assumes that this number refers to a quarter note; however,
+the abc standard 2.0 specifies that it should refer to the unit length
+specified by the L: command prior to the body.
+
+Fix: in parseabc.c changed a=1 to a=0 in the function parse_tempo().
+The existing code in tempunits() in store.c does all the rest.
+
+Jan 28 2013
+
+Abc2midi: the above change was withdrawn since there is disagreement
+between abc standard 1.7.6 and abc standard 2.0.
+
+February 25 2013
+
+Abcmatch: introduced -wpitch_hist runtime parameter for computing
+the pitch histogram weighted by the note length. Some minor clean-up
+of the output.
+
+February 26 2013
+
+Abcmatch: negative array index fixed in abcmatch.c (compute_note_histogram).
+Problem is exposed on Windows operating system.
+
+
+March 08 2013 -- patch submitted by Philippe De Muyter
+
+Abc2abc: the -V and -P options have been generalized so that more
+than one voice can be selected using a comma separated list.
+
+Implementation:
+
+The long global variable selected_voices represents the selected
+voice in a bit map. Each bit in the word corresponds to a specific
+voice number. Two new functions are introduced. parse_voices_selection
+parses the voices_string in the -P or -V command and converts it
+into the bitmap in the selected_voices variable. must_emit_voice(n)
+examines the n'th bit of the selected_voices and indicates whether
+it is on or off. The other change is the replacement of the control
+
+-  if ((selected_voice != -1) && (n != selected_voice)) {
+with
++  if (!must_emit_voice(n)) { /* [PHDM] 2013-03-08 */
+
+
+
+
+March 10 2013 -- also submitted by Philippe De Muyter
+
+abc2abc: fix chord's tuple length calculation
+
+Up to now, bar length was increased at first note of chord, and
+tuple status was lost at first note of last chord.  When a chord
+in a tuple had a length modifier, the resulting bar length
+was wrong, which caused wrong error messages.
+
+With
+        X:1
+        T:wrongbarlengtherror
+        M:4/4
+        L:1/8
+        K:C
+        z8 | z6 (3  [fd]/ [fd]3/ [fd] | z6 (3 [f/d/] [f3/d3/] [fd] |
+abc2abc gave a wrong message :
+        %Error : Bar 1 is 13/12 not 4/4
+
+Fix that, by incrementing bar length and decrementing `tuplenotes' at
+chordoff time, not at first chord note.
+Move also the tuple-implied length conversion in `addunits', to
+avoid code duplication.
+Because there are two ways to specify a chord length,
+        [c2e2g2]
+and        [ceg]2
+in the first case, we must now memorize the note length to be able
+to retrieve it at chordoff time; this is done in the new
+`chordfactor' variable.
+
+Additionnaly, as 'addunits' is only called when we know the exact length
+of a note or chord, `repudiate_lastaddunits' is now useless and removed.
+
+
+
+March 14 2013
+
+Abc2midi: part/repeat bug. In the following example
+
+X:1
+T: Part - repeat bug
+Q:1/2=120
+M:2/2
+L:1/4
+K:D
+%%vskip 0
+P:Intro
+|: "Em"e4 ||
+P:A
+|| "D"d4 :|
+
+abc2midi returns the following messages:
+Error in line 12 :  found another |: after a |:
+Warning in line 12 : Assuming repeat
+Warning in line 12 : replacing with double repeat (::)
+writing MIDI file temp21.mid
+
+Furthermore, the e4 in the Intro is repeated and then the D4
+in part A is repeated. Since the P: are only labels here
+(there is no P: command preceding K:), it was expected that
+the entire the tune would be played as
+|: "Em" e4 | "D" d4 :|
+
+Analysis: the function scan_for_missing_repeats() which was
+introduced in June 23 2009 is the source of the problem. The
+function assumes that the tune is actually in two parts and
+inserts a |: in the beginning of part A. When fixreps() is
+called it discovers that two |: occur without an
+intervening :|, so it decides to replace the second |: with
+a double repeat ::. (Note that fixreps() would not be called
+if the parts were real and not just annotations.)
+ 
+Fix:
+The useless conditional statement
+if (J == PART || j == VOICE || j == BAR_REP etc.
+was commented out since it does nothing.
+In the following statement, an additional check parts != -1
+was added. If parts == -1, this implies that the part indications
+are merely annotations and do imply a real part as abc2midi is
+concerned. Therefore bar_rep_found[] and voicestart[] are not
+cleared again, implying that a |: may need to be introduced at
+the beginning of the part if the part ends with a :|.
+
+
+
+
+March 20 2013
+
+Abc2midi: invisible and visible multirest confusion with field commands.
+Z and X are used both as field declarations (X: reference number
+and Z: transcription source) and as multirests in the body. In unusual
+cases where the multirest is followed by a repeat sign and happens
+to be at the beginning of a line, it can cause confusion. For example,
+
+
+X:1
+T: rests
+M:3/4
+K:C
+c6|e6|^g6|\
+X ::\
+C6|e'6|^G6|\
+Z :|\
+[CE^G]6|]
+
+
+X:2
+T:rests
+M:3/4
+K:C
+c6|e6|^g6|\
+X1::\
+C6|e'6|^G6|\
+Z1:|\
+[CE^G]6|]
+
+are two examples which abc2midi fails to interpret correctly. parseline()
+in parseabc.c attempts to treat X :: and Z :| as field commands even
+though they are malformed. Abc2abc also does not produce correct output.
+
+Fortunately parseline issues warnings
+
+Warning in line 8 : whitespace in field declaration
+Warning in line 8 : potentially ambiguous line
+Error in line 8 : Missing Number
+
+and the transcriber is urged to reformat the line to avoid this problem.
+
+Fix: I am not sure whether I should fix this problem. In any case,
+I have put a small patch in parseline() so that the above examples
+are treated correctly.
+
+
+March 21 2013
+
+abcmatch: several bug fixes and a new feature -pitch_table.
+Given a file containing a collection of tunes eg. Modes.abc,
+abcmatch Modes.abc -pitch_table
+will output the interval weighted pitch histogram for each
+tune. If the output is stored in a separate file, eg. Modes.tab,
+this table could be used for searching for the tune having the
+closest matching pitch histogram (a feature to be introduced
+in runabc).
+
+
+
+March 26 2013
+
+abc2midi bug: if a chord is preceded by a Roll or Trill indication,
+abc2midi fails to encode the chord in the MIDI file.
+
+For example:
+
+
+X:1
+T: chordtrill
+M: 4/4
+L: 1/8
+K:C
+V:1
+%%MIDI program 16
+T[ceg]4 [AEc]4 :|
+V:2
+%%MIDI channel 10
+GA GA GA GA :|
+
+A warning is issued that trills and rolls are not implemented for
+chords, but [ceg]4 is not encoded in the MIDI file.
+
+Fix: in event_note, in store.c added the lines 
+
+      pitchline[notes] = pitch_noacc; /* [SS] 2013-03-26 */
+      bentpitch[notes] = active_pitchbend; /* [SS] 2013-03-26 */
+      addfeature(NOTE, pitch, num*4, denom*2*(v->default_length)); /* [SS] */
+
+following the statement
+     event_error("Rolls and trills not supported in chords");
+
+
+April 10 2013
+
+Abc2midi: new feature. Added a new runtime option -CSM <filename>.
+This option allows one to customize the BarFly stress models by
+providing an external file.
+
+Background: the 32 stress models are presently built-in the source
+code in the file stresspat.c. This has the advantage that executables
+can be distributed without an auxiliary data file containing
+the models. However, the user does not have much leeway to alter
+the models or add additional stress models. The -CSM feature
+addresses this limitation by allowing the user to add more
+models for other rhythm designators (eg lesnoto), and to alter
+one or more of the existing models. There is room to add up to
+16 additional models. The feature requires the user to specify
+a text file which contains these models. 
+
+Description of the external file and how it works is given
+in abcguide.txt and a sample of such a file is given in the
+pt folder (customstress.txt).
+
+Implementation: a new function read_custom_stress_file()
+was introduced in the file stresspat.c. Assuming the file
+conforms exactly with the expected format, the function
+reads all the models provided. For each model, if the rhythm
+designator and meter conflict with one of the existing standard
+models, the function will update the characteristics of that model.
+Otherwise the function will append the model to the current
+list.
+
+
+April 11 2013
+
+Corrected a minor error in init_stresspat() (Tango) in stresspat.c.
+As a convenience, I have produced default_stress.txt in the format
+that read_custom_stress_file() accepts. Default_stress.txt contains
+the built in models to abc2midi. You can find the file in the pt (Phil
+Taylor) folder.
+
+
+April 17 2013
+
+Abcmatch: numerous bugs fixed. Introduced a new matching -norhythm.
+The matching algorithm ignores the length of the notes and only
+matches the sequence of pitches in a bar. The file abcmatch.txt
+was updated. More internal documentation was added in abcmatch.c
+
+
+April 20 2013
+
+Abc2midi bug: combination of chords and broken rhythm. In the
+following example,
+
+X:1
+T: broken rhythms
+M: 2/4
+L: 1/8
+K: F
+[DF]2 > [CE]2|
+
+The second chord [CE]2 begins before the end of chord [DF]2.
+
+Analysis: the function brokenadjust() (store.c)  is called
+to adjust the lengths of the notes to effect the broken rhythm.
+It adjusts the notes inside the chord but fails to adjust the length
+associated with the CHORD (CHORDOFFEX feature). This causes
+timestep() in queues.c to be called too early, causing the
+second chord to start to early.
+
+Fix: in the function lenmul() added another condition,
+  || (feature[n] == CHORDOFFEX)) /* [SS] 2013-04-20 */
+
+
+April 21 2013
+
+Fixed: a potential memory overflow in parsing the repeat string.
+In getrep() (parseabc.c) ensured the array index for playonrep_list
+does not exceed 50.
 

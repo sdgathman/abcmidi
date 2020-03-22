@@ -87,7 +87,7 @@ int decorators_passback[DECSIZE];
  * from event_instruction to parsenote.
 */
  
-char inputline[256]; /* [SS] 2011-06-07 */
+char inputline[512]; /* [SS] 2011-06-07 2012-11-22 */
 char * linestart; /* [SS] 2011-07-18 */
 int lineposition; /* [SS] 2011-07-18 */
 char timesigstring[16]; /* [SS] 2011-08-19 links with stresspat.c */
@@ -616,8 +616,17 @@ int interpret_voicestring(char *s)
 */
 int i;
 char code[32];
+char msg[80]; /* [PHDM] 2012-11-22 */
 char *c;
 c =readword(code,s);
+
+/* [PHDM] 2012-11-22 */
+if (*c != '\0' && *c != ' ' && *c != ']') {
+     sprintf(msg, "invalid character `%c' in Voice ID", *c);
+     event_error(msg);
+    }
+/* [PHDM] 2012-11-22 */
+
 if (code[0] == '\0') return 0;
 if (voicecodes == 0) {strcpy(voicecode[voicecodes],code);
 	              voicecodes++;
@@ -1287,12 +1296,16 @@ char* out;
       count = count + 1;
       q = q + 1;
       digits = digits + 1;
+      /* [SS] 2013-04-21 */
+      if (count > 50) {event_error ("malformed repeat"); break;}
     } else {
       if (((*q == '-')||(*q == ','))&&(digits > 0)&&(isdigit(*(q+1)))) {
         out[count] = *q;
         count = count + 1;
         q = q + 1;
         digits = 0;
+      /* [SS] 2013-04-21 */
+        if (count > 50) {event_error ("malformed repeat"); break;}
       } else {
         done = 1;
       };
@@ -1396,7 +1409,8 @@ char* place;
     };
     p = p + 1;
   } else {
-    a = 1;
+     a = 1; /* [SS] 2013-01-27 */
+    /*a = 0;  [SS] 2013-01-27 */
     b = 4;
     p = place;
   };
@@ -1693,16 +1707,26 @@ char* p;
   return(q);
 }
 
-/* this function is used by toabc.c [SS] 2011-06-07 */
-void print_inputline ()
-{
-printf("%s\n",inputline);
-}
-
 /* this function is used by toabc.c [SS] 2011-06-10 */
 void print_inputline_nolinefeed ()
 {
+if (inputline[sizeof inputline - 1] != '\0') {
+  /*
+   * We are called exclusively by toabc.c,
+   * and when we are called, event_error is muted,
+   * so, event_error("input line truncated") does nothing.
+   * Simulate it with a plain printf. [PHDM 2012-12-01]
+   */
+  printf("%%Error : input line truncated\n");
+}
 printf("%s",inputline);
+}
+
+/* this function is used by toabc.c [SS] 2011-06-07 */
+void print_inputline ()
+{
+print_inputline_nolinefeed();
+printf("\n");
 }
 
 void parsemusic(field)
@@ -1938,13 +1962,15 @@ char* field;
 	};
 /* full bar rest */
       case 'Z':
+      case 'X':  /* [SS] 2012-11-15 */
+
         {
           int n, m;
 
           p = p + 1;
           readlen(&n, &m, &p);
           if (m != 1) {
-            event_error("Z must be followed by a whole integer");
+            event_error("X or Z must be followed by a whole integer");
           };
           event_mrest(n, m);
           break;
@@ -2095,7 +2121,7 @@ char* line;
   char *p, *q;
 
 /*  printf("%d parsing : %s\n", lineno, line);  */
-  strncpy(inputline,line,256); /* [SS] 2011-06-07 */
+  strncpy(inputline,line,sizeof inputline); /* [SS] 2011-06-07 [PHDM] 2012-11-27 */
 
   p = line;
   linestart = p;  /* [SS] 2011-07-18 */
@@ -2127,8 +2153,20 @@ char* line;
       };
       if ((*(q+1) == ':') || (*(q+1) == '|')) {
         event_warning("potentially ambiguous line");
-      };
-      parsefield(*p, q+1);
+/*    [SS] 2013-03-20 */
+/*     };             */
+/*      parsefield(*p,q+1); */
+
+/*    [SS} 2013-03-20 start */
+/*    malformed field command try processing it as a music line */
+        if (inbody) {
+          if (parsing) parsemusic(p);
+        } else {
+          if (parsing) event_text(p);
+        };
+      } else parsefield(*p, q+1); /* not field command malformed */
+/*    [SS] 2013-03-20  end */
+
     } else {
       if (inbody) {
         if (parsing) parsemusic(p);
