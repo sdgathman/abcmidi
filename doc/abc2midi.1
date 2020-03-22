@@ -2,7 +2,7 @@
 .SH NAME
 \fBabc2midi\fP \- converts abc file to MIDI file(s)
 .SH SYNOPSIS
-abc2midi \fIinfile\fP [\fIrefnum\fP] [\-c] [\-v] [\-ver] [\-t] [\-n limit] [\-CS] [\-quiet] [\-silent] [\-Q tempo] [\-NFNP] [\-NFER] [\-NGRA] [\-STFW] [\-OCC] [\-NCOM] [\-HARP] [\-BF] [\-TT] [\-o outfile] \-CSM [filename]
+abc2midi \fIinfile\fP [\fIrefnum\fP] [\-c] [\-v] [\-ver] [\-t] [\-n limit] [\-CS] [\-quiet] [\-silent] [\-Q tempo] [\-NFNP] [\-NFER] [\-NGRA] [\-NGUI] [\-STFW] [\-OCC] [\-NCOM] [\-HARP] [\-BF] [\-TT] [\-o outfile] \-CSM [filename]
 .SH DESCRIPTION
  The default action is to write a MIDI file for each abc tune
  with the filename <stem>N.mid, where <stem> is the filestem
@@ -51,6 +51,9 @@ Ignore any fermata indications (eg H or !fermata!).
 .TP
 .B -NGRA
 Ignore any grace notes.
+.TP
+.B -NGUI
+Ignore any guitar chords enclosed in double quotes.
 .TP
 .B -STFW
 Place lyric text in separate MIDI tracks.

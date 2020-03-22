@@ -1,11 +1,11 @@
 abcMIDI :   abc <-> MIDI conversion utilities
 
-midi2abc version 3.41 November 13 2019
-abc2midi version 4.24 October 13 2019
-abc2abc  version 2.02 June 06 2019
-yaps     version 1.73 August 11 2019
+midi2abc version 3.43 January 06 2020
+abc2midi version 4.27 January 14 2020
+abc2abc  version 2.03 January 03 2020
+yaps     version 1.74 January 03 2020
 abcmatch version 1.73 June 06 2019
-midicopy version 1.32 July 05 2019
+midicopy version 1.35 January 05 2019
 
 24th January 2002
 
@@ -14,7 +14,7 @@ J.R.Allwright@westminster.ac.uk
 University of Westminster,
 London, UK
 
-January 01 2019
+January 03 2020
 
 Seymour Shlien
 Ottawa, Canada

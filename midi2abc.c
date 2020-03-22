@@ -45,7 +45,7 @@
  * based on public domain 'midifilelib' package.
  */
 
-#define VERSION "3.41 November 13 2019"
+#define VERSION "3.43 January 06 2019 midi2abc"
 
 /* Microsoft Visual C++ Version 6.0 or higher */
 #ifdef _MSC_VER
@@ -2597,7 +2597,7 @@ int len;
       fprintf(outhandle,"[");
       while (i != NULL) {
         printpitch(i->note);
-        printfract(len, parts_per_unitlen);
+        /* printfract(len, parts_per_unitlen); [SS] 2020-01-06 */
         if (len < i->note->playnum) {
           fprintf(outhandle,"-");
         };
@@ -2605,6 +2605,7 @@ int len;
         i = i->next;
       };
       fprintf(outhandle,"]");
+      printfract(len, parts_per_unitlen); /* [SS] 2020-01-06 */
       midline = 1;
     };
   };
@@ -3239,8 +3240,11 @@ int trackno,  anacrusis;
       now = i->note->time;
       i = i->next;
       advancechord(0); /* get rid of any zero length notes */
-      if (trackcount > 1 && trackno !=0)
+
+      /*if (trackcount > 1 && trackno !=0)
 	      handletext(now, &textplace0, trackno);
+      [SS] 2019-12-30   */
+
       handletext(now, &textplace,trackno);
       barnotes_correction = barsize - last_barsize;
       barnotes += barnotes_correction;

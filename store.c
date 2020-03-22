@@ -184,7 +184,7 @@ int main()
 
  */
 
-#define VERSION "4.24 October 13 2019 abc2midi" 
+#define VERSION "4.27 January 14 2020 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -277,6 +277,7 @@ int started_parsing=0;
 int v1index= -1;
 int ignore_fermata = 0; /* [SS] 2010-01-06 */
 int ignore_gracenotes = 0; /* [SS] 2010-01-08 */
+int ignore_guitarchords = 0; /* [SS] 2019-12-09 */
 int separate_tracks_for_words = 0; /* [SS] 2010-02-02 */
 int bodystarted =0;
 int harpmode=0;  /* [JS] 2011-04-29 */
@@ -901,7 +902,7 @@ char **filename;
     verbose = 0;
   };
   if (getarg("-ver",argc, argv) != -1) {
-     printf("abc2midi %s\n",VERSION);
+     printf("%s\n",VERSION); /* [SS] 2019-12-30 */
      exit(0);
   }
 /* look for "no forte no piano" option */
@@ -923,6 +924,12 @@ char **filename;
      ignore_gracenotes = 0;
     }
 
+  /* [SS] 2019-12-09 */
+  if (getarg("-NGUI",argc, argv) != -1) {
+     ignore_guitarchords = 1;
+  } else {
+     ignore_guitarchords = 0;
+    }
   
   if (getarg("-NCOM", argc, argv) != -1) {
     nocom = 1;
@@ -1010,7 +1017,7 @@ char **filename;
     printf("abc2midi version %s\n",VERSION);
     printf("Usage : abc2midi <abc file> [reference number] [-c] [-v] ");
     printf("[-o filename]\n");
-    printf("        [-t] [-n <value>] [-CS] [-NFNP] [-NCOM] [-NFER] [-NGRA] [-HARP]\n");
+    printf("        [-t] [-n <value>] [-CS] [-NFNP] [-NCOM] [-NFER] [-NGRA] [-NGUI] [-HARP]\n");
     printf("        [reference number] selects a tune\n");
     printf("        -c  selects checking only\n");
     printf("        -v  selects verbose option\n");
@@ -1026,6 +1033,7 @@ char **filename;
     printf("        -NCOM suppress comments in output MIDI file\n");
     printf("        -NFER ignore all fermata markings\n");
     printf("        -NGRA ignore grace notes\n");
+    printf("        -NGUI ignore guitar chord indications\n");
     printf("        -STFW separate tracks for words (lyrics)\n");
     printf("        -HARP ornaments=roll for harpist (same pitch)\n"); /* [JS] 2011-04-29 */
     printf("        -BF Barfly mode: invokes a stress model if possible\n");
@@ -4381,6 +4389,7 @@ char* s;
   int bassnote;
   int inversion;
 
+  if (ignore_guitarchords == 1) return; /* [SS] 2019-12-09 */
   if ((*s >= '0') && (*s <= '5')) {
     event_finger(s);
     return;

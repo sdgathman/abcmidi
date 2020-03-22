@@ -865,7 +865,7 @@ it was invoked. (4) In the function txt_keysig(), the verbose
 message sent to the tlistx structure was replaced with just
 the sf and mi (number of sharps/flats and major/minor flag).
 (5) In the function txt_timesig(), The verbose message was
-replaced with just the key signature nn/denom. (6) Major
+replaced with just the time signature nn/denom. (6) Major
 additions were made to the function handletext() which now
 does more than just print text at the appropriate place.
 If the text string is a key signature or time signature as
@@ -13478,9 +13478,87 @@ now returns miditype ntrks and ppqn. The program line returns
 the current time in ticks. The changes were introduces to support
 the function show_prog_structure in runabc.tcl.
 
+December 09 2019
+
+abc2midi: some abc files use the $ character to indicate a linebreak
+in the score. For example,
+I:linebreak $
+The score contains numerous $ characters and abc2midi complains that
+it does not recognize the character $. Fix, added the lines
+
+else if (fileprogram == ABC2MIDI && *p == '$') ; /* ignore [SS] 2019-12-9 */
+                /* $ sometimes used as a score linebreak character */
+
+in parsemusic() in parseabc.c
 
 
+December 09 2019
+
+abc2midi: new feature. Double quotes are supposed to be used to indicate
+chord symbols (guitar chords) which abc2midi uses to create an
+accompaniment. Unfortunately, the double quotes notation is frequently
+misused to display other information that can cause a problem.
+Added the option -NGUI to ignore any guitar chords in the body of
+file.
 
 
+December 22 2019 December 25 2019
 
+midicopy: introduced new options for handling the percussion track.
+
+
+December 30 2019
+
+midi2abc: fix handling text messages (including %%MIDI and lyrics).
+
+
+January 03 2020
+
+abc2midi, abc2abc, yaps -- compatibility with abcm2ps.
+The %%begintext and %%endtext enclose text which should not
+be processed by abc2midi or abc2abc.   The flag ignore_line is set
+to 1 when parseline() encounters "%%begintext" and is reset to 0
+when %%endtext" is encountered. If ignore_line is 1, the rest of
+the code in parseline() is ignored when abc2midi is running.
+
+
+January 05 2020
+
+midicopy: when copying a region in the middle of a midi file,
+it may encounter and copy a midi noteoff message without a
+corresponding midi noteon message. midi2abc complains when
+it attempts to create an abc file.
+Fix: the close_note() function in midicopy.c checks whether
+the specified note is still playing. If it is not playing,
+close_note() returns -1 and a noteoff channel message is
+not issued by copy_noteoff(). In addition, it was necessary
+to fix writechanmsg_at_0 called by winamp_compatibility_measure().
+To make a proper noteon message the velocity has to be nonzero.
+The velocity of value 1 at pitch 0 should be nonaudible.
+
+
+January 06 2020
+
+midi2abc: chords such as [A3/2C3/2E3/2G3/2] are now expressed
+more compactly as [ACEG]3/2. The patch was inserted in printchord()
+in midiabc.c.
+
+January 14 2020
+
+abc2midi: addressing ticket #25 on sourceforge. abc2midi hangs
+on some systems for this example.
+
+X:1
+L:1/4
+K:C
+2c/2fac'/c'/c'/c'/c'///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+Fix: add a test for zero denominator in genmidi.c
+if (tnote_denom <= 0) {
+                      event_error("note length denominator is zero or less"); /* [SS] 2020-01-14 to prevent infinite loop on some systems */
+                      exit(1);
+              }
+
+in function writetrack().
 

@@ -16,6 +16,10 @@ midicopy \- Copy selected track, channel, time interval of a MIDI file to anothe
     [\fB-focusonchannel\fP \fIn1,n2,... (from 1)\fP]\
     [\fB-attenuation\fP \fIn\fP]\
     [\fB-nobends\fP]\
+    [\fB-indrums\fP \fIn1,n2,...\fP]\
+    [\fB-xdrums\fP \fIn1,n2,...\fP]\
+    [\fB-onlydrums\fP]\
+    [\fB-nodrums\fP]\
  \fIinput.mid output.mid\fP
 .SH "DESCRIPTION"
 .PP
@@ -126,6 +130,18 @@ Specifies the amount the note velocities are reduced by either
 .TP
 .B -nobends
 Suppresses all channel pitchbend commands.
+.TP
+.B -indrums  n1,n2,...
+Only allow percussions with codes n1,n2,...
+.TP
+.B -xdrums  n1,n2,...
+Exclude the percussions with codes n1,n2,...
+.TP
+.B -onlydrums
+Only copy the percussion channel.
+.TP
+.B -nodrums
+Copy all channels except the percussion channel.
 
 .SH EXAMPLE
 .B midicopy.exe -trks 1,5 -from 2669 -to 8634 uzicko.mid fragment.mid
@@ -138,4 +154,4 @@ Midicopy will copy tracks 1 and 5 starting from midi pulse position
 .SH AUTHOR
 This manual page was written by Seymour Shlien.
 .SH VERSION
-This man page describes midicopy version 1.30 from December 15 2017.
+This man page describes midicopy version 1.33 from December 22 2019.

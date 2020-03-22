@@ -2995,6 +2995,10 @@ int xtrack;
               tnote_denom = note_denom;
               if (gtfract(note_num,note_denom,trim_num,trim_denom))
                 addfract(&tnote_num,&tnote_denom,-trim_num,trim_denom);
+	      if (tnote_denom <= 0) {
+		      event_error("note length denominator is zero or less"); /* [SS] 2020-01-14 to prevent infinite loop on some systems */
+		      exit(1);
+	      }
               addtoQ(tnote_num, tnote_denom, pitch[j] + transpose +global_transpose,
                channel,effecton, -totalnotedelay -1); /* [SS] 2012-12-11 */
                } 

@@ -52,7 +52,7 @@
 
 
 
-#define VERSION "1.32 July 05 2019"
+#define VERSION "1.35 January 05 2020 midicopy"
 #include "midicopy.h"
 #define NULLFUNC 0
 #define NULL 0
@@ -139,9 +139,10 @@ void WriteVarLen (long);
 int notechan[2048];		/* keeps track of running voices */
 int tocopy[64];			/* tracks to copy */
 int ctocopy[16];		/* channels to copy */
+int dtocopy[82];                /* drums to copy  2019-12-22 */
 int tfocus[64];                 /* track focus    2017-11 27*/
 int cfocus[16];                 /* channel focus  2017-11-27*/
-int chnflag = 0;		/* flag indicating not all channels selected */
+int drmflag = 0;                /* flag indicating drums selected 2019-12-22 */
 int verbatim = 0;		/* flag for verbatim transfer 2019-06-29 */
 int haschannel[17];             /* for determining which channels are in use */
 int hastempo[64];		/* indicates whether tempo command in track */
@@ -203,6 +204,7 @@ close_note (int chan, int pitch)
 {
   int index;
   index = 128 * chan + pitch;
+  if (notechan[index] == -1) return -1; /*[SS] 2020-01-05  already closed */
   if (index < 0 || index > 2047)
     printf ("illegal chan/pitch %d %d\n", chan, pitch);
   notechan[index] = -1;
@@ -288,12 +290,15 @@ void
 copy_noteon (int chan, int c1, int c2)
 {
   char data[2];
+  int notestatus;
+  if (cut_beginning ())
+    return;
+  notestatus = 0; /* [SS] 2020-01-05 */
   if (c2 > 0)
     open_note (chan, c1);
   else
-    close_note (chan, c1);
-  if (cut_beginning ())
-    return;
+    notestatus = close_note (chan, c1);
+  if (notestatus == -1) return; /* [SS] 2020-01-05 already turned off */
   data[0] = (char) c1;
   data[1] = (char) c2;
   mf_write_midi_event (0x90, chan, data, 2);
@@ -305,9 +310,11 @@ void
 copy_noteoff (int chan, int c1, int c2)
 {
   char data[2];
-  close_note (chan, c1);
+  int notestatus; /* [SS] 2020-01-05 */
   if (cut_beginning ())
     return;
+  notestatus = close_note (chan, c1);
+  if (notestatus == -1) return; /* [SS] 2020-01-05 note already not on */
   data[0] = (char) c1;
   data[1] = (char) c2;
   mf_write_midi_event (0x80, chan, data, 2);
@@ -1025,7 +1032,9 @@ chanmessage (int status, int c1, int c2)
     nochanmsg = 0;
 
 /* only process the channels that we want */
-  if (ctocopy[chan])
+  if (ctocopy[chan]) {
+   if (drmflag == 0 || dtocopy[c1] == 1 && chan == 9 || chan != 9)  
+	   /* [SS] 2019-12-25 */
     switch (status & 0xf0)
       {
       case 0x80:
@@ -1066,8 +1075,8 @@ chanmessage (int status, int c1, int c2)
 	copy_chanpressure (chan, c1);
 	break;
       }
+   }
 }
-
 
 
 
@@ -1294,8 +1303,12 @@ build_new_midi_file (format, ntracks, division, fp)
 	  if (track_time > seconds_output)
 	    seconds_output = track_time;
 	  turn_off_all_playing_notes ();
+/*
+ * test
 	  if (i > 1 && nochanmsg)
 	    winamp_compatibility_measure ();
+*/
+          
 	  if (flag_metaeot)
 	    copy_metaeot ();	/*need end of track message */
 	  ignore_rest_of_track ();
@@ -1342,7 +1355,8 @@ writechanmsg_at_0 ()
   if (delta < 0)
     delta = 1000;
   data[0] = (char) 0;		/* pitch zero */
-  data[1] = (char) 0;		/* volume zero */
+  data[1] = (char) 1;		/* volume 1 so not confused with noteoff */
+                                /* [SS] 2020-01-05 */
   c = 0x9f;			/* MIDI ON channel 15 */
   WriteVarLen (0);
   eputc (c);
@@ -1771,8 +1785,10 @@ main (int argc, char *argv[])
   int arg;
   int trk[16], mtrks;
   int chn[16], chns;
+  int drm[20];  /* 2019-12-22 */
   int xtrks; /* [SS] 2013-10-28 */
   int xchns; /* [SS] 2017-12-06 */
+  int xdrms; /* [SS] 2019-12-22 */
   int i;
   int byteloc, trknum;
   int repflag;
@@ -1835,6 +1851,10 @@ main (int argc, char *argv[])
       printf ("-focusonchannels n1,n2,...\n"); /* [SS] 2017-11-27 */
       printf ("-attenuation n\n"); /* [SS] 2017-11-27 */
       printf ("-nobends\n"); /* [SS] 2017-11-27 */
+      printf ("-indrums n1,n2,... (drums to include)\n"); /* [SS] 2019-12-22 */
+      printf ("-xdrums n1,n2,... (drums to exclude)\n"); /* [SS] 2019-12-22 */
+      printf ("-onlydrums (only channel 10)\n"); /* [SS] 2019-12-22 */
+      printf ("-nodrums (exlcude channel 10)\n"); /* [SS] 2019-12-22 */
       exit (1);
     }
 
@@ -1888,7 +1908,6 @@ main (int argc, char *argv[])
       for (i = 0; i < xchns; i++)
 	if (chn[i] > 0 && chn[i] < 17)
 	  ctocopy[chn[i] - 1] = 0;
-      chnflag = 1;
     }
 
   arg = getarg ("-chns", argc, argv);
@@ -1904,7 +1923,6 @@ main (int argc, char *argv[])
       for (i = 0; i < chns; i++)
 	if (chn[i] > 0 && chn[i] < 17)
 	  ctocopy[chn[i] - 1] = 1;
-      chnflag = 1;
     }
 
   arg = getarg ("-from", argc, argv);
@@ -2076,6 +2094,50 @@ main (int argc, char *argv[])
   repflag = getarg ("-replace", argc, argv);
   if (repflag >= 0)
     sscanf (argv[repflag], "%d,%d,%c", &trknum, &byteloc, &val);
+
+  arg = getarg ("-indrums", argc, argv); /* [SS] 2019-12-22 */
+  if (arg >= 0) {
+    xdrms = sscanf (argv[arg], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+		    &drm[0], &drm[1], &drm[2], &drm[3], &drm[4],
+		    &drm[5], &drm[6], &drm[7], &drm[8], &drm[9], &drm[10],
+		    &drm[11], &drm[12], &drm[13], &drm[14], &drm[15],
+		    &drm[16], &drm[17], &drm[18], &drm[19]);
+  if (xdrms > 0)
+    {
+      for (i = 0; i< 82; i++) 
+         dtocopy[i] = 0; /* percussion types to transfer */
+      for (i = 0; i<xdrms; i++)
+         if (drm[i] > 34 && drm[i] < 82)
+            dtocopy[drm[i]] = 1;
+    }
+    drmflag = 1;
+}
+
+  arg = getarg ("-xdrums", argc, argv); /* [SS] 2019-12-22 */
+  if (arg >= 0) {
+    xdrms = sscanf (argv[arg], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+		    &drm[0], &drm[1], &drm[2], &drm[3], &drm[4],
+		    &drm[5], &drm[6], &drm[7], &drm[8], &drm[9], &drm[10],
+		    &drm[11], &drm[12], &drm[13], &drm[14], &drm[15],
+		    &drm[16], &drm[17], &drm[18], &drm[19]);
+    if (xdrms > 0) {
+      for (i = 0; i< 82; i++) 
+         dtocopy[i] = 1; /* percussion types to transfer */
+      for (i = 0; i<xdrms; i++)
+         if (drm[i] > 34 && drm[i] < 82)
+            dtocopy[drm[i]] = 0;
+    }
+    drmflag = 1;
+  }
+
+  arg = getarg("-onlydrums",argc,argv); /* [SS] 2019-12-22 */
+  if (arg >=0) {
+    for (i=0;i<16;i++) ctocopy[i] = 0;
+    ctocopy[9] = 1;
+    }
+
+  arg = getarg("-nodrums",argc,argv); /* [SS] 2019-12-22 */
+  if (arg >=0) ctocopy[9] = 0;     
 
   F_in = fopen (argv[argc - 2], "rb");
   if (F_in == NULL)

@@ -2739,6 +2739,8 @@ parsemusic (field)
 		  {
 		    event_reserved (*p);
 		  }
+		else if (fileprogram == ABC2MIDI && *p == '$') ; /* ignore [SS] 2019-12-9 */
+	       	/* $ sometimes used as a score linebreak character */
 		else
 		  {
 		    sprintf (msg, "Unrecognized character: %c", *p);
@@ -2762,6 +2764,15 @@ parseline (line)
 /* top-level routine for handling a line in abc file */
 {
   char *p, *q;
+
+  /* [SS] 2020-01-03 */
+  if (strcmp(line,"%%begintext") == 0) {
+	  ignore_line = 1;
+          }
+  if (strcmp(line,"%%endtext") == 0) {
+	  ignore_line = 0;
+          }
+  if (ignore_line == 1 && fileprogram == ABC2MIDI) return;
 
   handle_abc2midi_parser (line);  /* [SS] 2017-04-12 */
   /* if (ignore_line == 1) return;  [SS] 2017-04-12 */
