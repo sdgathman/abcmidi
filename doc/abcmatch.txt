@@ -1,6 +1,6 @@
 abcmatch		version 1.35	January 15 2006.
 
-seymour.shlien@crc.ca
+seymour shlien <fy733@ncf.ca>
 
 Introduction:
 ------------
@@ -104,14 +104,16 @@ Here is now an explanation of the program and its run time
 parameters.  If you run abcmatch without any parameters you
 will see:
 
-abcmatch version 1.32
+abcmatch version 1.55
 Usage : abcmatch <abc file> [-options]
         [reference number] selects a tune
         -c returns error and warning messages
         -v selects verbose option
         -r resolution for matching
         -con  pitch contour match
+        -fixed <n> fixed number of notes
         -qnt quantized pitch contour
+        -lev use levenshtein distance
         -a report any matching bars (default all bars)
         -ign ignore simple bars
         -br %d only report number of matched bars when
@@ -121,7 +123,9 @@ Usage : abcmatch <abc file> [-options]
         -pitch_hist pitch histogram
         -wpitch_hist interval weighted pitch histogram
         -length_hist pitch histogram
+        -interval_hist pitch interval histogram
         -pitch_table separate pitch pdfs for each tune
+        -interval_table separate interval pdfs for each tune
 
 
 When running this program, you must provide the name of the abc file name
@@ -161,7 +165,7 @@ units where a quarter note normally is assigned a value of
 a value of 6, a half note has a value of 48 and etc. If you
 specify a temporal resolution of 12, then the pitch values
 of the notes only need to match at time units which are multiples
-of an eigth note. 
+of an eighth note. 
 
 This means that the program would match the two bars
 C2 D2| and C C D D|.
@@ -169,6 +173,16 @@ Similarly C2 D2| would also match C/D/C/D/D2|. By using
 a suitable value of the resolution, you can perform the
 matching only at the beginning of a measure or at the
 beginning of each beat.
+
+The -fixed <n> option causes the program to disregard
+bar lines when does the matching. It allows matching
+of notes between tunes having different time signatures.
+n is a number which specifies the exact number of
+notes to match. For example if n is 4, the program
+could match
+|C E G E| .. with |C E|G E|
+Note the matcher still starts at a beginning
+of a given bar for both the tune and template.
 
 Normally, when the program is presented with a sequence
 of several bars, the program will try it match it with
@@ -255,6 +269,30 @@ The program quantizes a quarter note into 24 units. Thus eighth notes
 have a value of 12, dotted half notes 72, etc. The program does
 not require the match.abc file to be present if you are computing
 the histograms since it does not perform any matching.
+
+
+abcmatch.exe scotjig.abc -interval_hist
+
+computes the histogram of the pitch interval in midi units
+between adjacent notes. The histogram is restricted between
+intervals -12 and 12 units.
+
+eg.
+interval_histogram
+-5 2
+-4 3
+-3 10
+-2 17
+-1 3
+0 8
+1 3
+2 23
+3 11
+4 1
+5 4
+
+For a collection of tunes in a file, you can use -pitch_table
+or -interval_table to create a database for future analysis.
 
 
 Limits of the program

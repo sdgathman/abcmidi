@@ -33,6 +33,7 @@ extern int time_num, time_denom;
 extern int verbose;
 extern int beatmodel, stressmodel;
 extern char timesigstring[16];	/* from parseabc.c */
+extern int *checkmalloc(int size);
 
 void reduce (int *, int *);
 
@@ -418,7 +419,8 @@ stress_locator (char *rhythmdesignator, char *timesigstring)
   return -1;
 }
 
-void
+/* [SS] 2015-12-31 load_stress_parameters  returns 0 or -1 */
+int
 load_stress_parameters (char *rhythmdesignator)
 {
   int n, i, index, nval;
@@ -433,7 +435,7 @@ load_stress_parameters (char *rhythmdesignator)
   if (strlen (rhythmdesignator) < 2)
     {
       beatmodel = 0;
-      return;
+      return -1;
     }
   index = stress_locator (rhythmdesignator, timesigstring);
   if (index == -1)
@@ -448,7 +450,7 @@ load_stress_parameters (char *rhythmdesignator)
 	}
       printf ("\n");
       beatmodel = 0;
-      return;
+      return -1;
     }
 
   if (stressmodel == 0)
@@ -483,6 +485,7 @@ load_stress_parameters (char *rhythmdesignator)
 */
     }
 /*printf("maxdur = %f\n",maxdur);*/
+return 0;
 }
 
 
@@ -499,64 +502,65 @@ read_custom_stress_file (char *filename)
   int nseg, nval;
   int gain;
   float expand;
-  char **p;
   int i, j;
   init_stresspat ();
   inhandle = fopen (filename, "r");
   if (inhandle == NULL)
-    {
-      printf ("Failed to open file %s\n", filename);
-      exit (1);
-    }
+  {
+    printf ("Failed to open file %s\n", filename);
+    exit (1);
+  }
   if (verbose > 0) printf("reading %s\n",filename);
   while (!feof (inhandle))
-    {
-      if (feof (inhandle))
-	break;
-      j = fscanf (inhandle, "%s", &name);
-      if (j == -1)
-	break;
-      j = fscanf (inhandle, "%s", &meter);
-      index = stress_locator (&name[0], &meter[0]);
-      if (verbose > 1) printf ("%s %s index = %d\n",name,meter,index);
-
-      j = fscanf (inhandle, "%d %d", &nseg, &nval);
-      if (verbose > 2) printf ("j = %d nseg = %d nval = %d\n", j, nseg, nval);
-      if (j != 2) exit(-1);
-     
-      if (nval > 16) {
-        printf("stresspat.c: nval = %d is too large for structure %s\n",nval,name);
-        exit(-1);
-        }
-
-/* copy model to stresspat[] */
-      if (index <0) {
-        /*creating new model, must include name and meter */
-        index = nmodels;
-        if (index > 47)
-  	  {
-	  printf ("used up all available space for stress models\n");
-	  return;
-	  }
-       nmodels++;
-       stresspat[index].name =
-	(char *) checkmalloc ((strlen (name) + 1) * sizeof (char));
-       stresspat[index].meter =
-	(char *) checkmalloc ((strlen (meter) + 1) * sizeof (char));
-       stresspat[index].name = name;
-       stresspat[index].meter = meter;
-       }
-
-      stresspat[index].nseg = nseg;
-      stresspat[index].nval = nval;
-      for (i = 0; i < nval; i++)
-	{
-	  j = fscanf (inhandle, "%d %f", &gain, &expand);
-	  if(verbose > 2) printf ("%d %f\n", gain, expand);
-          if (j != 2) exit(1);
-	  if (feof (inhandle))
-	    break;
-	}
-      fgets (str, 3, inhandle);
+  {
+    if (feof (inhandle))
+      break;
+    j = fscanf (inhandle, "%s", &name);
+    if (j == -1)
+      break;
+    j = fscanf (inhandle, "%s", &meter);
+    index = stress_locator (&name[0], &meter[0]);
+    if (verbose > 1) printf ("%s %s index = %d\n",name,meter,index);
+    
+    j = fscanf (inhandle, "%d %d", &nseg, &nval);
+    if (verbose > 2) printf ("j = %d nseg = %d nval = %d\n", j, nseg, nval);
+    if (j != 2) exit(-1);
+    
+    if (nval > 16) {
+      printf("stresspat.c: nval = %d is too large for structure %s\n",nval,name);
+      exit(-1);
     }
+    
+    /* copy model to stresspat[] */
+    if (index <0) {
+      /*creating new model, must include name and meter */
+      index = nmodels;
+      if (index > 47)
+      {
+        printf ("used up all available space for stress models\n");
+        return;
+      }
+      nmodels++;
+      stresspat[index].name =
+      (char *) checkmalloc ((strlen (name) + 1) * sizeof (char));
+      stresspat[index].meter =
+      (char *) checkmalloc ((strlen (meter) + 1) * sizeof (char));
+      strcpy(stresspat[index].name, name); /* [RZ] 2013-12-25 */
+      strcpy(stresspat[index].meter, meter); /* [RZ] 2013-12-25 */
+    }
+    
+    stresspat[index].nseg = nseg;
+    stresspat[index].nval = nval;
+    for (i = 0; i < nval; i++)
+    {
+      j = fscanf (inhandle, "%d %f", &gain, &expand);
+      if(verbose > 2) printf ("%d %f\n", gain, expand);
+      if (j != 2) exit(1);
+      if (feof (inhandle))
+        break;
+      stresspat[index].vel[i] = gain;      /* [RZ] 2013-12-25 */
+      stresspat[index].expcoef[i] = expand; /* [RZ] 2013-12-25 */
+    }
+    fgets (str, 3, inhandle);
+  }
 }

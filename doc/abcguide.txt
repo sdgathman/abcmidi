@@ -1,6 +1,6 @@
 Guide to writing abc for abc2midi
 ---------------------------------
-(updated February 08 2010 -- gchordbars)
+Updated June 1 2017. %%MIDI program ranges from 0 to 127 not 1 to 128.
 
 The defining document for abc is the abc version 1.6 specification which can 
 be found at http://www.gre.ac.uk/~c.walshaw/abc2mtex/abc.txt . This document
@@ -719,7 +719,7 @@ selects melody channel n (in the range 1-16).
 
 %%MIDI program [c] n
 
-selects program n (in the range 1-128) on channel c. If c is not given, the
+selects program n (in the range 0-127) on channel c. If c is not given, the
 program is selected on the current melody channel. Most modern tone
 generators follow the General MIDI standard which defines the instrument 
 type for each program number. These instrument types are listed at the end
@@ -1111,7 +1111,7 @@ portamento is followed by "bass" or "chord", the event will be
 applied to the bass or chord channel, otherwise it will be 
 applied to the current channel. The parameter n should be between
 0 and 63. Large values imply a slow transition between pitches.
-I have found the resulting effect to be rather wierd, especially
+I have found the resulting effect to be rather weird, especially
 for large pitch intervals.
 
 %%MIDI noportamento [bass/chord] 
@@ -1273,6 +1273,10 @@ to the normal temperament using the  command
 %%MIDI termperamentnormal
 
 
+%%MIDI tuninsystem comma53
+quantizes the pitches of the notes using the comma53 system where
+an octave is divided into 53 equally spaced tones.
+
 
 %%MIDI makechordchannels n
 
@@ -1289,7 +1293,7 @@ with this command, they are no longer available and since
 there are only 16 MIDI channels you can easily run out.
 Furthermore, you need to allocate chordchannels for any
 other voices which may have in voice chords. The channel
-allocation process will automatically propogate the program
+allocation process will automatically propagate the program
 assignment (musical instrument) to the other chordchannels,
 so be sure you set the program before using this command.
 If you need to change the program assignments, you can
@@ -1352,6 +1356,69 @@ value which here is 1.4.
 %%MIDI stressmodel n
 
 where n is either 1 or 2, selects the stress model implementation.
+
+
+%%MIDI expand m/n
+
+This command,causes  all the following notes be lengthened by
+the amount factor m/n so that they overlap the next note.
+Thus the next note is started at the proper time, but the
+previous note ends after the beggining of the note.
+This overlap causes a nice effect for particular MIDI instruments
+such as choir voices. The %%MIDI expand function behaves in
+the opposite manner as the %%MIDI trim function.
+
+
+%%MIDI snt k pitch
+
+Since many MIDI devices do not support this function, use of
+this command is not recommended. The command changes the tuning
+of a single note using the "universal system exclusive messages".
+k is the MIDI pitch being retuned (a number between 0 to 127)
+and pitch is a floating point number representing the pitch's new
+value in MIDI pitch units.
+
+
+%%MIDI bendvelocity n1 n2
+
+This command defines how to bend the a particular note following
+the !bend! decoration. The pitch of the note shifts up or down
+as the note is playing. n1 is the velocity of the pitch change
+and n2 is the acceleration (how fast the velocity changes).
+The bend is accomplished by modifying the MIDI pitchwheel where
+the 8192 is the neutral.  Minimum and maximum values
+are 0 and 16383 correspond to two semitones shifts in either
+directions. The velocity and acceleration may be positive or
+negative.
+
+
+%%MIDI bendstring n1 n2 n3 n4 etc
+
+This command is a more general way for defining how a note
+is bent.  It can also apply with !shape! decoration
+discussed later. The note is split into n equal segments corresponding
+to each of the n1, n2, etc values. The n1, n2, ... values are the
+increments (or decrements if they are negative) which are added 
+to the pitchwheel value. Thus
+%%MIDI bendstring 1000 1000 -500 -500
+will split a note into 4 parts and the pitchwheel values in
+each part will be 9192, 10192, 9692, and 9192.
+
+
+
+%%MIDI controlstring m n1 n2 n3 ...
+
+This command defines how the m th MIDI controller changes for the
+note following the !shape! decoration. The note is divided
+into n segments where n is the number of values following
+the m or controller number. n1, n2, n3, ... are the values for
+controller m in each segment. This allows you to shape the sound
+of the note. For example, by changing the modwheel or the expression.
+All the values m, n1, n2 are numbers between 0 and 127.
+
+
+
+
 
 
 Global settings for abc2midi
@@ -1493,134 +1560,134 @@ then a break or missing beat might be noticeable.
 General MIDI Program Number/Instrument Name
 -------------------------------------------
 
- 1. Acoustic Grand Piano
- 2. Bright Acoustic Piano 
- 3. Electric Grand Piano
- 4. Honky-tonk Piano 
- 5. Electric Piano 1 
- 6. Electric Piano 2 
- 7. Harpsichord 
- 8. Clavi 
- 9. Celesta 
- 10. Glockenspiel 
- 11. Music Box 
- 12. Vibraphone 
- 13. Marimba 
- 14. Xylophone 
- 15. Tubular Bells 
- 16. Dulcimer 
- 17. Drawbar Organ 
- 18. Percussive Organ 
- 19. Rock Organ 
- 20. Church Organ 
- 21. Reed Organ 
- 22. Accordion 
- 23. Harmonica 
- 24. Tango Accordion 
- 25. Acoustic Guitar (nylon) 
- 26. Acoustic Guitar (steel) 
- 27. Electric Guitar (jazz) 
- 28. Electric Guitar (clean) 
- 29. Electric Guitar (muted) 
- 30. Overdriven Guitar 
- 31. Distortion Guitar 
- 32. Guitar harmonics 
- 33. Acoustic Bass 
- 34. Electric Bass (finger) 
- 35. Electric Bass (pick) 
- 36. Fretless Bass 
- 37. Slap Bass 1 
- 38. Slap Bass 2 
- 39. Synth Bass 1 
- 40. Synth Bass 2 
- 41. Violin 
- 42. Viola
- 43. Cello 
- 44. Contrabass 
- 45. Tremolo Strings 
- 46. Pizzicato Strings 
- 47. Orchestral Harp 
- 48. Timpani 
- 49. String Ensemble 1 
- 50. String Ensemble 2 
- 51. SynthStrings 1 
- 52. SynthStrings 2 
- 53. Choir Aahs 
- 54. Voice Oohs 
- 55. Synth Voice 
- 56. Orchestra Hit 
- 57. Trumpet 
- 58. Trombone 
- 59. Tuba 
- 60. Muted Trumpet 
- 61. French Horn 
- 62. Brass Section 
- 63. SynthBrass 1 
- 64. SynthBrass 2 
- 65. Soprano Sax
- 66. Alto Sax 
- 67. Tenor Sax 
- 68. Baritone Sax 
- 69. Oboe 
- 70. English Horn
- 71. Bassoon 
- 72. Clarinet 
- 73. Piccolo
- 74. Flute 
- 75. Recorder 
- 76. Pan Flute
- 77. Blown Bottle
- 78. Shakuhachi 
- 79. Whistle 
- 80. Ocarina 
- 81. Lead 1 (square) 
- 82. Lead 2 (sawtooth)
- 83. Lead 3 (calliope) 
- 84. Lead 4 (chiff) 
- 85. Lead 5 (charang) 
- 86. Lead 6 (voice) 
- 87. Lead 7 (fifths) 
- 88. Lead 8 (bass + lead)
- 89. Pad 1 (new age)
- 90. Pad 2 (warm) 
- 91. Pad 3 (polysynth)
- 92. Pad 4 (choir) 
- 93. Pad 5 (bowed) 
- 94. Pad 6 (metallic) 
- 95. Pad 7 (halo) 
- 96. Pad 8 (sweep) 
- 97. FX 1 (rain) 
- 98. FX 2 (soundtrack) 
- 99. FX 3 (crystal) 
- 100. FX 4 (atmosphere) 
- 101. FX 5 (brightness) 
- 102. FX 6 (goblins) 
- 103. FX 7 (echoes) 
- 104. FX 8 (sci-fi) 
- 105. Sitar 
- 106. Banjo 
- 107. Shamisen 
- 108. Koto 
- 109. Kalimba 
- 110. Bag pipe 
- 111. Fiddle 
- 112. Shanai 
- 113. Tinkle Bell 
- 114. Agogo 
- 115. Steel Drums 
- 116. Woodblock 
- 117. Taiko Drum 
- 118. Melodic Tom 
- 119. Synth Drum 
- 120. Reverse Cymbal 
- 121. Guitar Fret Noise 
- 122. Breath Noise 
- 123. Seashore 
- 124. Bird Tweet 
- 125. Telephone Ring 
- 126. Helicopter 
- 127. Applause 
- 128. Gunshot
+ 0. Acoustic Grand Piano
+ 1. Bright Acoustic Piano 
+ 2. Electric Grand Piano
+ 3. Honky-tonk Piano 
+ 4. Electric Piano 1 
+ 5. Electric Piano 2 
+ 6. Harpsichord 
+ 7. Clavi 
+ 8. Celesta 
+ 9. Glockenspiel 
+ 10. Music Box 
+ 11. Vibraphone 
+ 12. Marimba 
+ 13. Xylophone 
+ 14. Tubular Bells 
+ 15. Dulcimer 
+ 16. Drawbar Organ 
+ 17. Percussive Organ 
+ 18. Rock Organ 
+ 19. Church Organ 
+ 20. Reed Organ 
+ 21. Accordion 
+ 22. Harmonica 
+ 23. Tango Accordion 
+ 24. Acoustic Guitar (nylon) 
+ 25. Acoustic Guitar (steel) 
+ 26. Electric Guitar (jazz) 
+ 27. Electric Guitar (clean) 
+ 28. Electric Guitar (muted) 
+ 29. Overdriven Guitar 
+ 30. Distortion Guitar 
+ 31. Guitar harmonics 
+ 32. Acoustic Bass 
+ 33. Electric Bass (finger) 
+ 34. Electric Bass (pick) 
+ 35. Fretless Bass 
+ 36. Slap Bass 1 
+ 37. Slap Bass 2 
+ 38. Synth Bass 1 
+ 39. Synth Bass 2 
+ 40. Violin 
+ 41. Viola
+ 42. Cello 
+ 43. Contrabass 
+ 44. Tremolo Strings 
+ 45. Pizzicato Strings 
+ 46. Orchestral Harp 
+ 47. Timpani 
+ 48. String Ensemble 1 
+ 49. String Ensemble 2 
+ 50. SynthStrings 1 
+ 51. SynthStrings 2 
+ 52. Choir Aahs 
+ 53. Voice Oohs 
+ 54. Synth Voice 
+ 55. Orchestra Hit 
+ 56. Trumpet 
+ 57. Trombone 
+ 58. Tuba 
+ 59. Muted Trumpet 
+ 60. French Horn 
+ 61. Brass Section 
+ 62. SynthBrass 1 
+ 63. SynthBrass 2 
+ 64. Soprano Sax
+ 65. Alto Sax 
+ 66. Tenor Sax 
+ 67. Baritone Sax 
+ 68. Oboe 
+ 69. English Horn
+ 70. Bassoon 
+ 71. Clarinet 
+ 72. Piccolo
+ 73. Flute 
+ 74. Recorder 
+ 75. Pan Flute
+ 76. Blown Bottle
+ 77. Shakuhachi 
+ 78. Whistle 
+ 79. Ocarina 
+ 80. Lead 1 (square) 
+ 81. Lead 2 (sawtooth)
+ 82. Lead 3 (calliope) 
+ 83. Lead 4 (chiff) 
+ 84. Lead 5 (charang) 
+ 85. Lead 6 (voice) 
+ 86. Lead 7 (fifths) 
+ 87. Lead 8 (bass + lead)
+ 88. Pad 1 (new age)
+ 89. Pad 2 (warm) 
+ 90. Pad 3 (polysynth)
+ 91. Pad 4 (choir) 
+ 92. Pad 5 (bowed) 
+ 93. Pad 6 (metallic) 
+ 94. Pad 7 (halo) 
+ 95. Pad 8 (sweep) 
+ 96. FX 1 (rain) 
+ 97. FX 2 (soundtrack) 
+ 98. FX 3 (crystal) 
+ 99. FX 4 (atmosphere) 
+ 100. FX 5 (brightness) 
+ 101. FX 6 (goblins) 
+ 102. FX 7 (echoes) 
+ 103. FX 8 (sci-fi) 
+ 104. Sitar 
+ 105. Banjo 
+ 106. Shamisen 
+ 107. Koto 
+ 108. Kalimba 
+ 109. Bag pipe 
+ 110. Fiddle 
+ 111. Shanai 
+ 112. Tinkle Bell 
+ 113. Agogo 
+ 114. Steel Drums 
+ 115. Woodblock 
+ 116. Taiko Drum 
+ 117. Melodic Tom 
+ 118. Synth Drum 
+ 119. Reverse Cymbal 
+ 120. Guitar Fret Noise 
+ 121. Breath Noise 
+ 122. Seashore 
+ 123. Bird Tweet 
+ 124. Telephone Ring 
+ 125. Helicopter 
+ 126. Applause 
+ 127. Gunshot
 
 ---------------------------------------------------------------------
 This reference written 1995-1998 by James Allwright 

@@ -1,12 +1,12 @@
-.TH ABC2MIDI 1 "27 August 2011"
+.TH ABC2MIDI 1 "June 2017"
 .SH NAME
 \fBabc2midi\fP \- converts abc file to MIDI file(s)
 .SH SYNOPSIS
-abc2midi \fIinfile\fP [\fIrefnum\fP] [-c] [-v] [-ver] [-t] [-n limit] [-RS] [-quiet] [-Q tempo] [-NFNP] [-NFER] [-NGRA] [-STFW] [-OCC] [-NCOM] [-HARP] [-BF] [-TT] [-o outfile] -CSM [filename]
+abc2midi \fIinfile\fP [\fIrefnum\fP] [\-c] [\-v] [\-ver] [\-t] [\-n limit] [\-CS] [\-quiet] [\-silent] [\-Q tempo] [\-NFNP] [\-NFER] [\-NGRA] [\-STFW] [\-OCC] [\-NCOM] [\-HARP] [\-BF] [\-TT] [\-o outfile] \-CSM [filename]
 .SH DESCRIPTION
  The default action is to write a MIDI file for each abc tune
  with the filename <stem>N.mid, where <stem> is the filestem
- of the abc file and N is the tune reference number. If the -o
+ of the abc file and N is the tune reference number. If the \-o
  option is used, only one file is written. This is the tune
  specified by the reference number or, if no reference number
  is given, the first tune in the file.
@@ -27,11 +27,14 @@ prints version number and exits
 .B -t
 selects filenames derived from tune titles
 .TP
-.B -RS
-use 3:1 instead of 2:1 for broken rhythms
+.B -CS
+use 2:1 instead of 3:1 for broken rhythms
 .TP
 .B -quiet
-Suppresses some commong warnings.
+Suppresses some common warnings.
+.TP
+.B -silent
+Suppresses other messages.
 .TP
 .B -n \fI X\fP
 limits the length of the file name stem to X characters
@@ -131,7 +134,7 @@ selects melody channel n (in the range 1-16).
 .PP
 %%MIDI program [c] n
 .PP
-selects program n (in the range 1-128) on channel c. If c is not given, the
+selects program n (in the range 0-127) on channel c. If c is not given, the
 program is selected on the current melody channel. Most modern tone
 generators follow the General MIDI standard which defines the instrument
 type for each program number.
@@ -140,7 +143,7 @@ type for each program number.
 .PP
 controls the way note velocities are selected. The first note in a bar has
 velocity a. Other "strong" notes have velocity b and all the rest have velocity
-c. a, b and c must be in the range 0-128. The parameter n determines which
+c. a, b and c must be in the range 0-127. The parameter n determines which
 notes are "strong". If the time signature is x/y, then each note is given
 a position number k = 0, 1, 2 .. x-1 within each bar. Note that the units for
 n are not the unit note length. If k is a multiple of n, then the note is
@@ -168,10 +171,10 @@ following :
 .PP
 Increments by n (or decrements if n is negative) the velocities a, b and
 c described above. The instructions !crescendo(! and !crescendo)!
-are equivalent to inserting a %%MIDI beatmod 15 whereever they
+are equivalent to inserting a %%MIDI beatmod 15 wherever they
 occur. (Alternatively you can use !<(! and !<)!.) Similarly the
 instructions !diminuendo(! and !diminuendo)! are equivalent
-to %%MIDI beatmod -15.
+to %%MIDI beatmod \-15.
 
 .PP
 %%MIDI deltaloudness n
@@ -313,7 +316,7 @@ You can use any combination of the gchord codes,
 %%MIDI chordprog n
 .PP
 Sets the MIDI instrument for the chords to be n. If the command
-includes the string octave=n where n is a number between -2 and 2
+includes the string octave=n where n is a number between \-2 and 2
 inclusive, then this will shift the pitch of the instrument by n
 octaves. For example %%MIDI chordprog 10 octave=1.)
 
@@ -321,9 +324,9 @@ octaves. For example %%MIDI chordprog 10 octave=1.)
 %%MIDI bassprog n
 .PP
 Sets the MIDI instrument for the bass notes to be n. If the command
-includes the string octave=n where n is a number between -2 and 2
+includes the string octave=n where n is a number between \-2 and 2
 inclusive, then this will shift the pitch of the instrument by n
-octaves. For example %%MIDI bassprog 10 octave=-1.)
+octaves. For example %%MIDI bassprog 10 octave=\-1.)
 .PP
 %%MIDI chordvol n
 .PP
@@ -353,7 +356,7 @@ by the %%MIDI drone command described below.
 .PP
 %%MIDI droneoff
 .PP
-Turns off the continous drone.
+Turns off the continuous drone.
 .PP
 %%MIDI drone n1 n2 n3 n4 n5
 .PP
@@ -458,6 +461,14 @@ parentheses. You can turn off all note trimming by setting x to 0,
 eg 0/1. By default, note trimming is turned off at the beginning
 of a tune or voice command.
 
+.PP
+%%MIDI expand x/y
+.PP
+where x and y are two numbers defining a fraction less than 1.
+This command controls the articulation of notes and chords in the
+reverse manner. The notes are lengthened by this fraction so they
+overlap the start of the next note.
+
 
 .PP
 %%MIDI drummap note midipitch
@@ -482,7 +493,7 @@ Model 2 modifies both the onset and ending of each note
 allowing a musical beat to expand or contract in time. However,
 the length of a musical measure should be preserved. Note
 if you using model 2, which the current default, you must
-include -BF as one of the runtime parameters of abc2midi.
+include \-BF as one of the runtime parameters of abc2midi.
 .PP
 The model divides a bar into equal segments. For each segment,
 a loudness or MIDI velocity is specified and a duration multiplier
@@ -504,8 +515,14 @@ value which here is 1.4.
 
 .PP
 %%MIDI stressmodel n
+.PP
 
 where n is either 1 or 2, selects the stress model implementation.
+
+.PP
+ other %%MIDI commands such as bendvelocity, bendstring,
+controlstring have been introduced recently and are described
+in the file abcguide.txt.
 
 
 
@@ -533,7 +550,7 @@ abc2ps(1), midi2abc(1), yaps(1).
 .SH AUTHOR
 James Allwright <J.R.Allwright@westminster.ac.uk>
 .SH SUPPORTED
- by Seymour Shlien <seymour.shlien@crc.ca>
+ by Seymour Shlien <fy733@ncf.ca>
 .SH VERSION
 This man page describes abc2midi version 2.27  June 25 2006.
 .SH COPYRIGHT

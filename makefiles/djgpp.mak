@@ -38,7 +38,7 @@ abc2abc.exe : parseabc.o toabc.o
 	$(LNK) -o abc2abc.exe parseabc.o toabc.o
 
 midi2abc.exe : midifile.o midi2abc.o 
-	$(LNK) midifile.o midi2abc.o -o midi2abc.exe
+	$(LNK) midifile.o midi2abc.o -o midi2abc.exe -lm
 
 mftext.exe : midifile.o mftext.o crack.o
 	$(LNK) midifile.o mftext.o crack.o -o mftext.exe

@@ -13,6 +13,7 @@ typedef enum {
 /* types of bar sign */
 SINGLE_BAR,
 DOUBLE_BAR,
+DOTTED_BAR,
 BAR_REP,
 REP_BAR,
 PLAY_ON_REP,
@@ -51,6 +52,7 @@ GRACEOFF,
 SETGRACE,
 SETC,
 SETTRIM,
+EXPAND,
 GCHORD,
 GCHORDON,
 GCHORDOFF,
@@ -89,7 +91,7 @@ SPLITVOICE,
 META,
 PEDAL_ON,
 PEDAL_OFF,
-EFFECT,
+EFFECT
 } featuretype;
 
 /* note decorations */

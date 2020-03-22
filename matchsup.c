@@ -120,6 +120,7 @@ int hornpipe, last_num, last_denom;
 int timesigset;
 int retain_accidentals;
 int ratio_a, ratio_b;
+int foundtitle; /* flag for capturing on the first title */
 
 struct voicecontext {
   /* maps of accidentals for each stave line */
@@ -448,6 +449,18 @@ void event_acciaccatura()
 return;
 }
 
+/* [SS] 2015-03-23 */
+void event_start_extended_overlay()
+{
+event_error("extended overlay not implemented in abcmatch");
+}
+
+void event_stop_extended_overlay()
+{
+event_error("extended overlay not implemented in abcmatch");
+}
+
+
 void event_split_voice()
 {
 }
@@ -637,7 +650,8 @@ char *f;
       };
       break;
     case 'T':
-      strncpy(titlename,f,46);
+     if (foundtitle == 0)  strncpy(titlename,f,46);
+     foundtitle = 1; /* [SS] 2014-01-01 */
       break;
     default:
       {
@@ -651,6 +665,13 @@ void event_words(p, continuation)
 char* p;
 int continuation;
 {
+}
+
+/* [SS] 2014-08-16 */
+void appendfield (morewords)
+char *morewords;
+{
+printf("appendfield not implemented here\n");
 }
 
 
@@ -723,6 +744,8 @@ char* s;
     };
   };
 }
+
+void event_octave(int, int);
 
 void event_voice(n, s, vp)
 /* handles a V: field in the abc */
@@ -1041,6 +1064,9 @@ void event_chord()
   };
 }
 
+void event_ignore () { };  /* [SS] 2018-12-21 */
+
+
 static void lenmul(n, a, b)
 /* multiply note length by a/b */
 int n, a, b;
@@ -1191,10 +1217,11 @@ int decorators[DECSIZE];
   };
 }
 
-void event_mrest(n,m)
+void event_mrest(n,m,c)
 /* multiple bar rest of n/m in the abc */
 /* we check for m == 1 in the parser */
 int n, m;
+char c; /* [SS] 2017-04-19 to distinguish X from Z in abc2abc */
 {
   int i;
   int decorators[DECSIZE];
@@ -1819,7 +1846,7 @@ static void headerprocess()
   voicesused = 0;
 }
 
-void event_key(sharps, s, modeindex, modmap, modmul, gotkey, gotclef, clefname,
+void event_key(sharps, s, modeindex, modmap, modmul, modmicrotone, gotkey, gotclef, clefname,
           octave, transpose, gotoctave, gottranspose, explict)
 /* handles a K: field */
 int sharps; /* sharps is number of sharps in key signature */
@@ -1827,6 +1854,7 @@ int modeindex; /* 0 major, 1,2,3 minor, 4 locrian, etc.  */
 char *s; /* original string following K: */
 char modmap[7]; /* array of accidentals to be applied */
 int  modmul[7]; /* array giving multiplicity of each accent (1 or 2) */
+struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
 int octave, transpose, gotoctave, gottranspose;
 int explict;
@@ -1931,6 +1959,7 @@ void event_refno(n)
 /* handles an X: field (which indicates the start of a tune) */
 int n;
 {
+  foundtitle = 0; /* [SS] 2014-01-10 */
   if (dotune) {
     finishfile();
     parseroff();
@@ -1983,7 +2012,7 @@ for (i=from;i<=to;i++)
   {
   j = feature[i];
   if (j<0 || j>73) printf("illegal feature[%d] = %d\n",i,j); /* [SS] 2012-11-25 */
-  else printf("%d %s   %d %d %d %d %d \n",i,featname[j],pitch[i],num[i],denom[i]);
+  else printf("%d %s   %d %d %d %d \n",i,featname[j],pitch[i],num[i],denom[i]);
   }
 }
 

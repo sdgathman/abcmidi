@@ -22,7 +22,7 @@
 /* yapstree.c - back-end for abc parser. */
 /* generates a data structure suitable for typeset music */
 
-#define VERSION "1.54 April 21 2012"
+#define VERSION "1.71 December 21 2017 yaps"
 #include <stdio.h>
 #ifdef USE_INDEX
 #define strchr index
@@ -1127,7 +1127,7 @@ char** filename;
     landscape = 0;
   };
   newscale = getarg("-s", argc, argv);
-  if ((newscale != -1) && (argc >= newscale)) {
+  if ((newscale != -1) && (argc >= newscale+1)) {  /* [SS] 2015-02-22 */
     setscaling(argv[newscale]);
   } else {
     setscaling("");
@@ -1321,9 +1321,22 @@ void event_acciaccatura()
 return;
 }
 
+/* [SS] 2015-03-23 */
+void event_start_extended_overlay()
+{
+event_error("extended overlay not implemented in yaps");
+}
+
+void event_stop_extended_overlay()
+{
+event_error("extended overlay not implemented in yaps");
+}
+
+
 void event_split_voice()
 {
-addfeature(SPLITVOICE, (void*) lineno);
+/* [SS] 2015-11-15 * changed (void*) to (int *) */
+addfeature(SPLITVOICE, (int *)  lineno);
 event_error("voice split not implemented in yaps");
 }
 
@@ -1336,8 +1349,9 @@ char *s;
 void event_linebreak()
 /* A linebreak has been encountered */
 {
+/* [SS] 2015-11-15 * changed (void*) to (int *) */
   if (xinbody) {
-    addfeature(LINENUM, (void*)lineno);
+    addfeature(LINENUM, (int *)lineno);
   };
 }
 
@@ -1498,7 +1512,7 @@ char *str; /* string following first word */
           vskip(vspace);
         };
       } else {
-        addfeature(VSKIP, (void*)((int)vspace));
+        addfeature(VSKIP, (int*)((int)vspace));
       };
     };
   };
@@ -1723,6 +1737,13 @@ int continuation;
     };
   };
   freevstring(&syll);
+}
+
+/* [SS] 2014-08-16 */
+void appendfield (morewords)
+char *morewords;
+{
+printf("appendfield not implemented here\n");
 }
 
 void event_part(s)
@@ -2080,13 +2101,14 @@ void event_octave(int num, int local)
   };
 }
 
-void event_key(sharps, s, minor, modmap, modmul, gotkey, gotclef, clefstr,
+void event_key(sharps, s, minor, modmap, modmul, modmicrotone, gotkey, gotclef, clefstr,
           octave, transpose, gotoctave, gottranspose, explict)
 int sharps;
 char *s;
 int minor;
 char modmap[7];
 int modmul[7];
+struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
 char* clefstr;
 int octave, transpose, gotoctave, gottranspose;
@@ -2153,7 +2175,8 @@ char* playonrep_list;
     return;
   };
   checkbar(type); /* increment bar number if bar complete */
-  addfeature(type, (void*)cv->barno); /* save bar number */
+/* [SS] 2015-11-15 * changed (void*) to (int *) */
+  addfeature(type, (int *)cv->barno); /* save bar number */
   switch(type) {
   case SINGLE_BAR:
     break;
@@ -2734,6 +2757,9 @@ void event_chordon(int chorddecorators[])
   cv->chordplace = addfeature(CHORDON, cv->thischord);
 }
 
+void event_ignore () { };  /* [SS] 2018-12-21 */
+
+
 
 void fix_enclosed_note_lengths(struct feature* chordplace,
       int chord_n, int chord_m, int * base, int * base_exp)
@@ -2864,8 +2890,9 @@ int decorators[DECSIZE];
   xevent_rest(n, m, 0);
 }
 
-void event_mrest(n,m)
+void event_mrest(n,m,c)
 int n, m;
+char c; /* [SS] 2017-04-19 to distinguish X from Z in abc2abc */
 /* A multiple bar rest has been encountered in the abc */
 {
   xevent_rest(1, 1, n);

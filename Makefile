@@ -33,25 +33,25 @@
 
 VERSION = @VERSION@
 
-CC = @CC@
-INSTALL = @INSTALL@
-INSTALL_DATA = @INSTALL_DATA@
-INSTALL_PROGRAM = @INSTALL_PROGRAM@
+CC = gcc
+INSTALL = /usr/bin/install -c
+INSTALL_DATA = ${INSTALL} -m 644
+INSTALL_PROGRAM = ${INSTALL}
 
-CFLAGS = -DANSILIBS @CFLAGS@  
-CPPFLAGS = @DEFS@ @CPPFLAGS@ -I. 
-LDFLAGS = @LDFLAGS@ -lm
+CFLAGS = -DANSILIBS  -O2  
+CPPFLAGS = -DHAVE_CONFIG_H  -I. 
+LDFLAGS =  -lm
 
-prefix = @prefix@
-exec_prefix = @exec_prefix@
+prefix = /usr/local
+exec_prefix = ${prefix}
 
-srcdir = @srcdir@
-VPATH = @srcdir@
-bindir = @bindir@
-libdir = @libdir@
-datadir = @datarootdir@
-docdir = @datarootdir@/doc/abcmidi
-mandir = @datarootdir@/man/man1
+srcdir = .
+VPATH = .
+bindir = ${exec_prefix}/bin
+libdir = ${exec_prefix}/lib
+datadir = ${prefix}/share
+docdir = ${prefix}/share/doc/abcmidi
+mandir = ${prefix}/share/man/man1
 
 binaries=abc2midi midi2abc abc2abc mftext yaps midicopy abcmatch
 

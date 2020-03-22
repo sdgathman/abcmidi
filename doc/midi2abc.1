@@ -1,15 +1,17 @@
-.TH MIDI2ABC 1 "10 March 2008"
+.TH MIDI2ABC 1 "1 January 2017"
 .SH NAME
 \fBmidi2abc\fP \- program to convert MIDI format files to abc notation
 .SH SYNOPSIS
-midi2abc -f \fIinfile\fP [-xa] [-ga]
-[-a \fIacbeats\fP] [-m \fItime signature\fP] 
-[-ppu \fiparts per unit\fP] [-aul \fidenominator of unit length\fP]
-[-gu] [-b \fIbars\fP] [-Q \fItempo\fP] [-u \fipulses\fP]
-[-k \fIkey\fP] [-c \fIchannel\fP] [-obpl] [-bpl \fibars\fP] [-bps \fPbars\fP]
-[-o \fIfilename\fP] [-s] [-sr \fiunits\fP] [-sum] [-nt]
-[-splitbars] [-splitvoices] [-midigram] [-mftext] [-nogr] [-title \fistring\fP]
-[-origin \fistring\fP]
+midi2abc \-f \fIinfile\fP [\-xa] [\-ga]
+[\-a \fIacbeats\fP] [\-m \fItime signature\fP]
+[\-ppu \fiparts per unit\fP] [\-aul \fidenominator of unit length\fP]
+[\-gu] [\-b \fIbars\fP] [\-Q \fItempo\fP] [\-u \fipulses\fP]
+[\-k \fIkey\fP] [\-c \fIchannel\fP] [\-obpl] [\-bpl \fibars\fP] [\-bps \fPbars\fP]
+[\-o \fIfilename\fP] [\-s] [\-sr \fiunits\fP] [\-sum] [\-nb] [\-nt]
+[\-splitvoices] [\-midigram] [\-mftext] [-mftextpulses] [\-nogr] [\-title \fistring\fP]
+[\-origin \fistring\fP]
+
+
 
 .SH DESCRIPTION
 \fImidi2abc\fP takes a MIDI format file and converts it to something as close
@@ -17,10 +19,10 @@ as possible to abc text format. The user then has to add text fields not
 present in the MIDI header and possibly tidy up the abc note output.
 .PP
 The output of midi2abc is printed to the screen. To save it to a file, use
-the redirection operator, (e.g. \fImidi2abc -f file.mid > file.abc\fP) or
-specify the output file using the -o option.
+the redirection operator, (e.g. \fImidi2abc \-f file.mid > file.abc\fP) or
+specify the output file using the \-o option.
 .PP
-Use only one or none of the options -u -gu, -b and -Q. Midi2abc normally
+Use only one or none of the options \-u \-gu, \-b and \-Q. Midi2abc normally
 converts the MIDI time units into quantum units normally corresponding to the
 abc 1/16th note or 1/32nd note.  If none of these is present, the
 program will use the PPQN information in the MIDI header to compute the suitable
@@ -28,11 +30,11 @@ conversion factor. For most MIDI files on the web, it is recommended to rely on
 the MIDI header information and not use any of the options other than
 the formatting options.
 .PP
-The program will extract the time signature infromation from the MIDI file
+The program will extract the time signature information from the MIDI file
 if it is present. Otherwise it will assume 4/4 or you could specify it with
--m. option. 
+\-m. option. 
 .PP
-If the tune has an anacrusis, you can use either the -ga or -xa option to estimate the its length. Alternatively, you can specify its value using the -a
+If the tune has an anacrusis, you can use either the \-ga or \-xa option to estimate the its length. Alternatively, you can specify its value using the \-a
 option. The anacrusis is specified in half unit lengths, where the unit
 length is defined by the L: field. For example if L: 1/8, then a
 quarter note would be indicated by the value 4, (4 1/16 units). 
@@ -54,7 +56,7 @@ time signature
 number of bars wanted in output 
 .TP
 .B -Q \fItempo\fP
-tempo in quarter-notes per minute
+tempo in quarter\-notes per minute
 .TP
 .B -u \fipulses\fP
 Allows you to specify directly the number of midi pulses per
@@ -64,7 +66,7 @@ abc time unit.
 Normally, the smallest note unit that midi2abc can extract
 is half the L: unit length.This is called the quantum unit.
 Thus for L: 1/8, midi2abc can extract 1/16 notes but not 1/32 notes.
-You can change this by specifying -ppu 4 for example. The number of parts
+You can change this by specifying \-ppu 4 for example. The number of parts
 should be a power of 2.
 .TP
 .B -aul \fidenominator of abc unit length\fP
@@ -72,7 +74,7 @@ Normally midi2abc chooses a unit length of 1/8 or 1/16
 depending upon the time signature. For time signatures
 smaller than 3/4 the L: 1/16 is used and for larger time
 signatures L: 1/8 is used. You can specify the unit length
-to be used using this parameter. Thus -aul 32 will cause
+to be used using this parameter. Thus \-aul 32 will cause
 midi2abc to use a unit length of 1/32 nd note.
 .TP
 .B -gu
@@ -88,7 +90,7 @@ If it is not specified, then the program guesses the
 key signature by minimizing accidentals.
 .TP
 .B -k \fIkey\fP
-key signature: -6 to 6 sharps.
+key signature: \-6 to 6 sharps.
 .TP
 .B -c \fIchannel\fP
 select only this midi channel.
@@ -111,8 +113,11 @@ is lengthened to include that rest.
 .B -sum
 print a short summary of the input midi file.
 .TP
+.B -nb
+do not look for broken rhythms
+.TP
 .B -nt
-do not look for triplets or broken rhythm
+do not look for triplets
 .TP
 .B -obpl
 Print only one bar per line instead of 4. For complex music this
@@ -130,19 +135,15 @@ Print nbars of music on every line followed by a backslash.
 When nbars have been printed (including those lines joined by
 a backslash continuation) go to a new line (with no backslash).
 .TP
-.B -splitbars
-This parameter changes the way midi2abc prints chords
-composed of notes of unequal length (polyphonic chords).
-Normally, midi2abc joins the longer notes to the notes in
-the following chord using ties. A more readable output, can
-be obtained if the measure is split into separate parts using
-the '&' feature in abc notation. The algorithm for dividing
-the notes in a polyphonic chord to separate voices (label_splits
-in midi2abc.c) needs some improvement. I welcome any assistance.
-.TP
 .B -splitvoices
-This parameter like above handles polyphonic chords by
-splitting an entire voice into multi voices.
+This parameter handles polyphonic chords by
+splitting an entire voice into multiple voices. (A polyphonic
+chord is a chord composed of notes that do not start
+or end at the same time.) Normally, midi2abc joins the
+longer notes to the notes in the following chord using ties.
+Here is an example:  [Bd-]d [Bd-]d|. This should
+be separated into two voices ideally  Bz Bz and d2 d2. However,
+the separation is not unique. Bz d2 and d2 Bz are also ok.
 .TP
 .B -midigram
 When this option appears, all other options are ignored and
@@ -161,12 +162,33 @@ no abc file is produced. Instead a list of all the MIDI
 commands are printed. The output is designed to go into
 a graphical user interface provided by runabc.tcl.
 .TP
+.B -mftextpulses
+Same as -mftext except the time units is in midi pulses.
+.TP
 .B -title \fistring\fP
 Replaces the default title field following T: with
 the given string.
 .TP
 .B -origin \fistring\fP
 Adds an O: field with the given string.
+.TP
+.B -stats
+Extracts the characteristics of the given midi file. They include
+ntrks - the number of tracks, ppqn - pulses per quarter note,
+timesig - time signature, keysig - key signature, program - mapping
+between channel number and midi program, npulses - length of the
+midi file in pulses, tempocmd - number of times the tempo has
+been specified, pitchbends - number of pitchbends, pitchbendin -
+number of pitchbends in each of the channels, programcmd - number of
+times the midi program has been revised, progs and progsact - the
+programs used and the number of pulses these programs used, drums -
+the drum numbers that were used, drumhits - the number of times
+each of those drums were hit, pitches - the number of times the
+11 pitch classes (C C# etc...) were activated and a few other
+complex variables. These characteristics are used in other
+applications such as midiexplorer. More details are available
+in the file midi2abc-stats.txt included in the doc/ folder
+of the abcmidi distribution package.
 
 
 .SS FEATURES
@@ -174,7 +196,7 @@ Adds an O: field with the given string.
 Alternatively, the user can specify the key numerically (a positive number
 is the number of sharps, a negative number is minus the number of flats).
 .PP
-* Note length can be set by specifiying the total number of bars or the 
+* Note length can be set by specifying the total number of bars or the 
 tempo of the piece. Alternatively the note length can be read from the file.
 However, by default it is deduced in a heuristic manner from the inter-note 
 distances.  This means that you do not have to use the MIDI clock as a 
@@ -202,7 +224,7 @@ errors occur if a barline is added or deleted.
 .PP
 * Text information from the original MIDI file is included as comments.
 .PP
-* The -c option can be used to select only 1 MIDI channel. Events on 
+* The \-c option can be used to select only 1 MIDI channel. Events on 
 other channels are ignored.
 .SS LIMITATIONS
 midi2abc does not ...
@@ -218,13 +240,13 @@ included in the text of the MIDI file.
 * Deduce repeats. The output is just the notes in the input file.
 .PP
 * Recover an abc tune as supplied to abc2midi. However, if you want to
-do this, "midi2abc  -xa -f file.mid" comes close.
+do this, "midi2abc  \-xa \-f file.mid" comes close.
 .SH "SEE ALSO"
 abc2ps(1), abc2midi(1), abc2abc(1)
 .SH AUTHOR
 James Allwright <J.R.Allwright@westminster.ac.uk>
 .SH SUPPORTED
-Seymour Shlien <seymour.shlien@crc.ca>
+Seymour Shlien <fy733@ncf.ca>
 .SH VERSION
 This man page describes midi2abc version 2.91 from March 09 2008.
 .SH COPYRIGHT
@@ -232,7 +254,7 @@ Copyright 1999 James Allwright
 .PP
 midi2abc does not work correctly if lyrics are embedded in
 the same track as the notes. If you are producing the MIDI
-file using abc2midi, use the -STFW option to ensure that the
+file using abc2midi, use the \-STFW option to ensure that the
 lyrics are put in a separate track.
 .PP
 midi2abc is supplied "as is" without any warranty. It

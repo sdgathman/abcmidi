@@ -53,7 +53,7 @@ abc2abc : parseabc.o toabc.o
 	$(LNK) -o abc2abc parseabc.o toabc.o
 
 midi2abc : midifile.o midi2abc.o 
-	$(LNK) midifile.o midi2abc.o -o midi2abc
+	$(LNK) midifile.o midi2abc.o -o midi2abc -lm
 
 mftext : midifile.o mftext.o crack.o
 	$(LNK) midifile.o mftext.o crack.o -o mftext
