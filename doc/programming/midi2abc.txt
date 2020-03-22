@@ -151,7 +151,8 @@ tracks are quantized by the function quantizer. This function
 assigns values to the anote entries, anote.xnum, anote.playnum
 and anote.denom. 
 
-anote.xnum	interval between the current note and following note.
+anote.xnum	interval between the current note and following note
+                also called the gap.
 anote.playnum	note duration.
 anote.denom	always has the value of 2.
 
@@ -193,5 +194,34 @@ and printpitch().
 After the track is printed, the memory allocated to the structures
 for the internal representation of the tracks is freed.
 
+The option -splitvoice was introduced to handle polyphonic chords.
+Without this option polyphonic chords appear in the abc file
+like this.
 
+[DF-A-][FA-]Az|
+
+this will be represented by three voices
+
+V: split1A
+D2 z6| 
+V: split1B
+F4 z4| 
+V: split1C
+A6 z2|
+
+This option is implemented by the function printtrack_split_voice().
+The function label_split_voices() is called to assign all the notes
+in the track to their split voice. This assignment of each note is
+stored in note->splitnum. This is a complex function since it needs
+to try to match the onset and end of each note in the chord. If
+it is unable to do this for a particular note, then the note is
+assigned to a different split. At the end, nsplits were created.
+The notes in each split are printed in a separate voice by the
+function printtrack_split(). The function printtrack_split(splitnumber)
+was derived from printtrack(); however, it only processes the
+notes belonging to a particular splitnumber.
+
+It was necessary to determine and store the offset of the first
+note in each split using the function set_first_gaps() prior
+to calling printtrack_split().
 

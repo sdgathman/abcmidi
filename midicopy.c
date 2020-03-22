@@ -35,6 +35,9 @@
  * using the function readtrack(). readtrack calls chanmessage()
  * or metaevent () depending on the nature ofthe command.
  *
+ * We never use verbatim transfer as of 2019-06-29
+ * so we can eliminate this flag.
+ *
  * readtrack() reads a particular track selecting the data
  * that it wishes to save in the character array trackdata.
  * 
@@ -49,7 +52,7 @@
 
 
 
-#define VERSION "1.30 December 15 2017"
+#define VERSION "1.32 July 05 2019"
 #include "midicopy.h"
 #define NULLFUNC 0
 #define NULL 0
@@ -93,8 +96,8 @@ long max_currtime = 0;
 long Mf_currcopytime = 0L;	/* time of last copied event */
 char *trackdata = NULL;
 long trackdata_length, trackdata_size;
-char *trackstr[32]; /* [SS] 2017-10-20 */
-int trackstr_length[32]; /* [SS] 2017-10-20 */
+char *trackstr[64]; /* [SS] 2017-10-20  2019-07-05*/
+int trackstr_length[64]; /* [SS] 2017-10-20 2019-07-05*/
 int trkid = 0;
 int activetrack;
 int nochanmsg = 1;
@@ -132,21 +135,24 @@ void biggermsg ();
 void WriteVarLen (long);
 
 
+/* tocopy, tfocus, hastempo extended to handle 64 tracks [SS] 2019-07-05*/
 int notechan[2048];		/* keeps track of running voices */
-int tocopy[32];			/* tracks to copy */
+int tocopy[64];			/* tracks to copy */
 int ctocopy[16];		/* channels to copy */
-int tfocus[32];                 /* track focus    2017-11 27*/
+int tfocus[64];                 /* track focus    2017-11 27*/
 int cfocus[16];                 /* channel focus  2017-11-27*/
 int chnflag = 0;		/* flag indicating not all channels selected */
-int verbatim = 1;		/* flag for verbatim transfer */
+int verbatim = 0;		/* flag for verbatim transfer 2019-06-29 */
 int haschannel[17];             /* for determining which channels are in use */
-int hastempo[32];		/* indicates whether tempo command in track */
+int hastempo[64];		/* indicates whether tempo command in track */
 
 FILE *F_in, *fp;
 int format, ntrks, division;
 int start_tick, end_tick, flag_metaeot;
 float start_seconds, end_seconds;
-int use_seconds = 0;
+int use_seconds;
+int use_beats;
+int use_ticks;
 int current_tempo = 500000;
 float seconds_output;
 
@@ -224,9 +230,9 @@ append_to_string (int c)
 {
   trackdata[trackdata_length] = c;
   trackdata_length++;
-  if (trackdata_length > trackdata_size)
+  if (trackdata_length > trackdata_size+6) /* [SS] 2019-06-05 */
     {
-      printf ("trackdata overflow\n");
+      printf ("trackdata %ld overflow at %ld for track %d\n",trackdata_length,Mf_currtime,activetrack);
       exit (1);
     }
 }
@@ -249,17 +255,28 @@ error (char *s)
 int
 cut_beginning ()
 {
-  if (Mf_currtime < start_tick)
-    return 1;
-  return 0;
+  if (use_seconds) {
+    if(currentseconds < start_seconds) return 1;
+    else {return 0;}
+  } else if (use_ticks) {
+    if (Mf_currtime < start_tick) return 1;
+    else {return 0;}
+  }
+return 0;
 }
+
 
 int
 cut_ending ()
 {
-  if (end_tick > 0 && Mf_currtime > end_tick)
-    return 1;
-  return 0;
+  if (use_seconds) {
+    if(currentseconds > end_seconds) return 1;
+    else {return 0;}
+ } else if (use_ticks) {
+  if (Mf_currtime > end_tick) return 1;
+  else {return 0;}
+ }
+return 0;
 }
 
 
@@ -587,6 +604,8 @@ readtrack ()
   long varinum;
   int i;                        /* [SS] 2017-10-19 */
   int chan;
+  double delta_seconds;
+
   for (i=0;i<17;i++) haschannel[i] = 0;
 
   laststatus = 0;		/* [SS] 2013-09-10 */
@@ -613,6 +632,9 @@ readtrack ()
     {
 
       delta_time = readvarinum ();
+      /* [SS] 2019-06-30 */
+      delta_seconds = (double) (60000*delta_time)/(double) (current_tempo * division);
+      currentseconds += delta_seconds;
       Mf_currtime += delta_time;
       if (cut_ending ())
 	{
@@ -1252,17 +1274,10 @@ build_new_midi_file (format, ntracks, division, fp)
   float track_time;
 
   seconds_output = 0.0;
-  temposize = 0;
-  tempo_array[temposize].tempo = current_tempo;
-  tempo_array[temposize].tick = 0;
-  tempo_array[temposize].seconds = 0.0;
-  temposize++;
 
   get_tempo_info_from_track_1 ();
-  if (start_seconds >= 0.0)
-    start_tick = seconds_to_tick (start_seconds);
-  if (end_seconds >= 0.0)
-    end_tick = seconds_to_tick (end_seconds);
+
+  if (ntracks > 63) {printf("too many tracks\n"); exit(1); }
 
   /* The rest of the file is a series of tracks */
   for (i = 0; i < ntracks; i++)
@@ -1549,7 +1564,7 @@ mf_write_tempo (tempo)
 
 /* fudge to avoid large time gap at beginning */
 /* It assumes a constant tempo. */
-  if (use_seconds && start_tick == -1 && start_seconds > 0)
+  if (use_seconds && start_tick == -1 && start_seconds > 0) /* [SS] 2019-06-29*/
     {
       start_tick = (int) (start_seconds * 1000000.0 * division / tempo);
       Mf_currcopytime = start_tick;
@@ -1763,7 +1778,6 @@ main (int argc, char *argv[])
   int repflag;
   char val;
   float start_beat, end_beat;
-  int use_beats;
   int beats_per_minute = 0;	/* [SS] 2013-09-04 */
   long trkhdr; /* [SS] 2017-10-20 */
 
@@ -1780,10 +1794,11 @@ main (int argc, char *argv[])
   xchns = 0;
   start_tick = -1;
   end_tick = -1;
-  start_seconds = -1.0;
-  end_seconds = -1.0;
+  start_seconds = -1.0;   /* [SS] 2019-06-30 */
+  end_seconds = -1.0; /* [SS] 2019-06-30 */
   use_seconds = 0;
   use_beats = 0;
+  use_ticks = 0;
 
   if (getarg ("-ver", argc, argv) >= 0)
     {
@@ -1874,7 +1889,6 @@ main (int argc, char *argv[])
 	if (chn[i] > 0 && chn[i] < 17)
 	  ctocopy[chn[i] - 1] = 0;
       chnflag = 1;
-      verbatim = 0;
     }
 
   arg = getarg ("-chns", argc, argv);
@@ -1891,21 +1905,25 @@ main (int argc, char *argv[])
 	if (chn[i] > 0 && chn[i] < 17)
 	  ctocopy[chn[i] - 1] = 1;
       chnflag = 1;
-      verbatim = 0;
     }
 
   arg = getarg ("-from", argc, argv);
   if (arg >= 0)
     {
       sscanf (argv[arg], "%d", &start_tick);
-      verbatim = 0;
+      use_seconds = 0; /* [SS] 2019-06-29 */
+      use_beats = 0;
+      use_seconds = 0;
+      use_ticks = 1; /* [SS] 2019-06-30 */
     }
 
   arg = getarg ("-to", argc, argv);
   if (arg >= 0)
     {
       sscanf (argv[arg], "%d", &end_tick);
-      verbatim = 0;
+      use_seconds = 0; /* [SS] 2019-06-29 */
+      use_beats = 0;
+      use_ticks = 1; /* [SS] 2019-06-30 */
     }
 
   arg = getarg ("-fromsec", argc, argv);
@@ -1913,14 +1931,16 @@ main (int argc, char *argv[])
     {
       sscanf (argv[arg], "%f", &start_seconds);
       use_seconds = 1;
-      verbatim = 0;
+      use_ticks = 0;
+      use_beats = 0;
     }
   arg = getarg ("-tosec", argc, argv);
   if (arg >= 0)
     {
       sscanf (argv[arg], "%f", &end_seconds);
       use_seconds = 1;
-      verbatim = 0;
+      use_ticks = 0; /* [SS] 2019-06-30 */
+      use_beats = 0;
     }
 
   arg = getarg ("-frombeat", argc, argv);
@@ -1928,7 +1948,7 @@ main (int argc, char *argv[])
     {
       sscanf (argv[arg], "%f", &start_beat);
       use_beats = 1;
-      verbatim = 0;
+      use_seconds = 0; /* [SS] 2019-06-29 */
     }
 
   arg = getarg ("-tobeat", argc, argv);
@@ -1936,7 +1956,7 @@ main (int argc, char *argv[])
     {
       sscanf (argv[arg], "%f", &end_beat);
       use_beats = 1;
-      verbatim = 0;
+      use_seconds = 0; /* [SS] 2019-06-29 */
     }
 
 /* [SS] 2013-09-04 */
@@ -1947,7 +1967,6 @@ main (int argc, char *argv[])
       if (beats_per_minute > 0)
 	{
 	  newtempo = 60 * 1000000 / beats_per_minute;
-	  verbatim = 0;
 	}
     }
 
@@ -1961,14 +1980,12 @@ main (int argc, char *argv[])
       if (speedfactor < 0.05)
 	speedfactor = 0.05;
       newspeed = 1;
-      verbatim = 0;
     }
 
 /* [SS] 2013-09-07 */
   arg = getarg ("-drumfocus", argc, argv);
   if (arg >= 0)
     {
-      verbatim = 0;
       sscanf (argv[arg], "%d", &selected_drum);
       if (selected_drum < 35 || selected_drum > 81)
 	{
@@ -1989,7 +2006,6 @@ main (int argc, char *argv[])
   if (arg >= 0)
     {
       mutenodrum = 1;
-      verbatim = 0;
       sscanf (argv[arg], "%d", &nondrumlevel);
     }
 
@@ -1997,7 +2013,6 @@ main (int argc, char *argv[])
   arg = getarg ("-setdrumloudness", argc, argv);
   if (arg >= 0)
     {
-      verbatim = 0;
       sscanf (argv[arg], "%d", &chosen_drum);
       if (chosen_drum < 35 || chosen_drum > 81)
 	{
@@ -2018,7 +2033,6 @@ main (int argc, char *argv[])
   arg = getarg("-focusontracks",argc,argv);
   if (arg >= 0)
      {
-     verbatim = 0;
      mtrks = sscanf (argv[arg], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
 		    &trk[0], &trk[1], &trk[2], &trk[3], &trk[4],
 		    &trk[5], &trk[6], &trk[7], &trk[8], &trk[9], &trk[10],
@@ -2043,7 +2057,6 @@ main (int argc, char *argv[])
 		   &chn[6], &chn[7], &chn[8], &chn[9], &chn[10], &chn[11]);
   if (chns > 0)
     {
-      verbatim = 0;
       for (i = 0; i < 16; i++)
 	cfocus[i] = 1;  /* attenuation flag */
       for (i = 0; i < chns; i++)
@@ -2085,8 +2098,16 @@ main (int argc, char *argv[])
 
 
   readheader ();
-  if (use_beats)
+
+  temposize = 0;               /* [SS] 2019-06-29 */
+  tempo_array[temposize].tempo = current_tempo;
+  tempo_array[temposize].tick = 0;
+  tempo_array[temposize].seconds = 0.0;
+  temposize++;
+
+  if (use_beats) /* [SS] 2019-06-29 */
     {
+      use_ticks = 1; /* [SS] 2019-06-30 */
       if (start_beat < 0.0)
 	start_tick = -1;
       else
@@ -2096,6 +2117,18 @@ main (int argc, char *argv[])
       else
 	end_tick = (int) (division * end_beat);
     }
+
+  else if (use_seconds) /* [SS] 2019-06-29 */
+   {
+   if (start_seconds >= 0.0)
+     start_tick = seconds_to_tick (start_seconds);
+   if (end_seconds >= 0.0)
+     end_tick = seconds_to_tick (end_seconds);
+   }
+
+   else { /* start_tick and end_tick already given */
+        }
+
   if (mtrks == 0)
     mtrks = ntrks;
 
@@ -2129,8 +2162,8 @@ main (int argc, char *argv[])
   fclose (fp);
 
 
-  if (end_tick < 0)
-    end_tick = max_currtime;
+  /* if (end_tick < 0) [SS] 2019-06-29 */
+  end_tick = max_currtime;
   start_seconds = tick_to_seconds (start_tick);
   end_seconds = tick_to_seconds (end_tick);
   seconds_output = end_seconds - start_seconds;

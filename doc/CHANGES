@@ -13314,3 +13314,99 @@ June 14 2019
 
 Midi2abc: to prevent printing blank lines, newline_flag global variable was
 introduced.
+
+June 17 2019:
+Midi2abc: added initialization of chordhead and chordtail in
+printtrack_split().
+
+June 20 2019:
+abc2midi crashes with the message
+.20 March 30 2019 abc2midi
+*** buffer overflow detected ***: abc2midi terminated
+Aborted (core dumped)
+for some abc files.
+
+Analysis: the crash occurs in sync_voice() in store.c when attempting
+to print a message with more than 80 characters (case PLAY_ON_REP).
+Fix: char message[128];
+
+
+June 26 2019
+abc2midi bug: trill - tie problem. The trill-tie combination
+disrupts the chordal accompaniment in the following example.
+
+%abc-2.1
+X:6
+T:trill-tie problem
+M:3/4
+L:1/4
+%%MIDI chordname m7b5 0 3 6 10 %0 _3 _5 _7
+I:MIDI=program 110 MIDI=chordprog 24 MIDI=bassprog 32
+K:A
+"Am"A/^G/ B/A/ c/B/|d/c/ e/d/ f/e/|"Bm7b5"Te3-|"E"e3|
+"Am"A/^G/ B/A/ c/B/|d/c/ e/d/ f/e/|"Bm7b5"e3-|"E"e3||
+
+Unfortunately, there is no easy fix. In order to apply
+the trill to the tied note, the tied note is converted
+into a long note. This is an example where two features
+clash with each other.
+
+
+June 26 2019
+midi2abc -splitvoices: fixing more problems in
+printtrack_split() function. Introducing firstgap[]
+and function set_first_gaps(trackno). Test file:
+
+X:1
+T: polyphonic chords
+M: 4/4
+L: 1/4
+K: C
+zC-[C-E-][CEG]|\
+zC-[C-E-][CEG]|\
+[DF-A-][FA-]Az|\
+[DF-A-][FA-]Az|
+
+More information was added to file programming/midi2abc.txt.
+
+
+June 29 2019
+midicopy requires that you specify the start and end times (or
+start and end beats) even when you are copying the entire
+midi file.
+
+midicopy returns the wrong number of seconds copied when -fromsec
+and -endsec are specified and are beyond the range of the midi file.
+
+Fixes: functions cut_beginning() and cut_ending() check global
+flags use_seconds and use_ticks. If neither are set then the
+midi file is not trimmed. These flags are set in main() depending
+on the options provided.
+
+We keep track of the current time (currentseconds) adjusting
+for tempo changes.
+
+
+July 05 2019
+
+Midicopy aborts with the message "trackdata overflow"
+
+Analysis: the input midi file contained more than 20 tracks containing
+no data. Each of those tracks contained 10 bytes. Midicopy while
+adding extra bytes for compatibility with the winamp program,
+caused the failure when the number of written bytes exceeded the
+track_size.
+
+Fix: in the function append_to_string in midicopy.c, a margin of 6
+extra bytes was introduced in the check for overflow. Also midicopy
+was modified to allow up to 64 tracks. A check is made to
+ensure this is not exceeded.
+
+
+July 12 2019
+
+Midi2abc. The handling of lyric text is currently a problem with
+midi2abc. For the present time I have added a new option -noly which
+suppresses lyric output. Introduced a new flag noly in midi2abc.c.
+
+

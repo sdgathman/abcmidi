@@ -45,7 +45,7 @@
  * based on public domain 'midifilelib' package.
  */
 
-#define VERSION "3.35 June 17 2019"
+#define VERSION "3.37 July 12 2019"
 
 /* Microsoft Visual C++ Version 6.0 or higher */
 #ifdef _MSC_VER
@@ -139,6 +139,7 @@ int allow_triplets; /* flag to allow triplets                   */
 int allow_broken;   /* flag to allow broken rhythms > <         */
 int obpl = 0; /* flag to specify one bar per abc text line      */
 int nogr = 0; /* flag to put a space between every note         */
+int noly = 0; /* flag to allow lyrics [SS] 2019-07-12           */
 int bars_per_line=4;  /* number of bars per output line         */
 int bars_per_staff=4; /* number of bars per music staff         */
 int asig, bsig;  /* time signature asig/bsig                    */
@@ -825,7 +826,7 @@ char *mess;
     else {
       if (leng < BUFFSIZE - 3) {
         sprintf(buffer2, " %s", textbuff); 
-        addtext(buffer2,0);
+        addtext(buffer2,type); /* [SS] 2019-07-12 */
       };
     };
   };
@@ -2732,6 +2733,11 @@ int trackno;
     str = (*textplace)->text;
     ch = *str;
     type = (*textplace)->type;
+    if (type == 5 && noly == 1) {  /* [SS] 2019-07-12 */
+        *textplace = (*textplace)->next;
+	return;
+        }
+
     remove_carriage_returns(str);
     if (((int)ch == '\\') || ((int)ch == '/')) {
       inkaraoke = 1;
@@ -2792,6 +2798,12 @@ int trackno;
 	active_asig=nn;
 	active_bsig=denom;
 	}
+      break;
+      case 5: /* lyric [SS] 2019-07-12*/
+      if (ch != '%') 
+      fprintf(outhandle,"%%%s\n", str);
+      else 
+      fprintf(outhandle,"%s\n", str);
       break;
      default:
       break;
@@ -2964,7 +2976,26 @@ return n;
 }
 
 
+/* [SS] 2019-06-26 */
+int firstgap[10];
 
+void set_first_gaps (int trackno) {
+struct listx* i;
+int j;
+int start;
+int splitnumber;
+start = track[trackno].startunits;
+for (j=0;j<10;j++) firstgap[j] = -1;
+i = track[trackno].head;
+while((i != NULL)) {
+  splitnumber =  i->note->splitnum; 
+  if (firstgap[splitnumber] < 0) {
+     firstgap[splitnumber] = start + i->note->posnum;
+     /* printf("split = %d gap = %d\n",splitnumber,firstgap[splitnumber]);*/
+     }
+  i = i->next;
+  }
+}
 
 
 /* [SS] 2019-06-13 */
@@ -2993,7 +3024,8 @@ void printtrack_split (int trackno, int splitnum, int anacrusis)
   chordhead = NULL;  /* [SS] 2019-06-17 */
   chordtail = NULL;
   i = track[trackno].head;
-  gap = track[trackno].startunits;
+  /* gap = track[trackno].startunits; */
+  gap = firstgap[splitnum];  /* [SS] 2019-06-26 */
   if (anacrusis > 0) {
     barnotes = anacrusis;
     barcount = -1;
@@ -3028,9 +3060,9 @@ void printtrack_split (int trackno, int splitnum, int anacrusis)
 	}
       i = i->next;
       advancechord(0); /* get rid of any zero length notes */
-      if (trackcount > 1 && trackno !=0)
+      if (trackcount > 1 && trackno !=0 && splitnum == 0)
 	      handletext(now, &textplace0, trackno);
-      handletext(now, &textplace,trackno);
+      /* handletext(now, &textplace,trackno); 2019-06-26 */
       barnotes_correction = barsize - last_barsize;
       barnotes += barnotes_correction;
       last_barsize = barsize;
@@ -3116,7 +3148,8 @@ int trackno,  anacrusis;
   int i;
   struct tlistx* textplace;
   nsplits = label_split_voices (trackno);
-  printf("%d splits were detected\n",nsplits);
+  /*printf("%d splits were detected\n",nsplits);*/
+  set_first_gaps (trackno);  /* [SS] 2019-06-26 */
   textplace = track[trackno].texthead;
   midline = 0;
   inkaraoke = 0;
@@ -3717,6 +3750,11 @@ int argc;
      nogr=1;
   else nogr = 0;
 
+  arg = getarg("-noly",argc,argv); /* [SS] 2019-07-12 */
+  if (arg != -1)
+     noly=1;
+  else noly = 0;
+
   arg = getarg("-title",argc,argv);
   if (arg != -1) {
        title = addstring(argv[arg]);
@@ -3766,6 +3804,7 @@ int argc;
     printf("         -bps <number> of bars to be printed on staff\n");
     printf("         -obpl One bar per line\n");
     printf("         -nogr No note grouping. Space between all notes\n");
+    printf("         -noly Suppress lyric output\n");
     printf("         -splitvoices  splits voices to avoid nonhomophonic chords\n");
     printf("         -title <string> Pastes title following\n");
     printf("         -origin <string> Adds O: field containing string\n");
