@@ -13569,3 +13569,8 @@ useful if you are trying to learn to read the bass clef and you are
 transposing the music down an octave.
 
 
+February 12 2020
+
+abc2midi: minor changes suggested by Timm Reasbeck to the default gchord
+patterns for various meters were incorporated in setbeat() in store.c.
+

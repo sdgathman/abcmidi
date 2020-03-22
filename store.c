@@ -184,7 +184,7 @@ int main()
 
  */
 
-#define VERSION "4.27 January 14 2020 abc2midi" 
+#define VERSION "4.28 February 12 2020 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -5670,8 +5670,23 @@ void setbeat()
   if ((time_num == 2) && (time_denom == 2)) {
     set_gchords("fzczfzcz");
   };
-  if (((time_num == 2) || (time_num == 4)) && (time_denom == 4)) {
+  if ( (time_num == 4) && (time_denom == 4)) {
     set_gchords("fzczfzcz");
+  };
+  if ( (time_num == 2)  && (time_denom == 4)) {
+    set_gchords("fzcz");
+  };
+  if ( (time_num == 6)  && (time_denom == 4)) {
+    set_gchords("fzczfzczfzcz");
+  };
+  if ((time_num == 3) && (time_denom == 8)) {
+    set_gchords("fzczcz");
+  };
+  if ((time_num == 5) && ((time_denom == 8) || (time_denom == 4))) {
+    set_gchords("fzbcz");
+  };
+  if ((time_num == 7) && ((time_denom == 8) || (time_denom == 4))) {
+    set_gchords("fzbczcz");
   };
   if ((time_num == 3) && (time_denom == 4)) {
     set_gchords("fzczcz");
