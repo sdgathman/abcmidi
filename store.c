@@ -184,7 +184,7 @@ int main()
 
  */
 
-#define VERSION "4.22 June 20 2019 abc2midi" 
+#define VERSION "4.24 October 13 2019 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -4279,6 +4279,7 @@ int xoctave, n, m;
         bentpitch[notes] = active_pitchbend;
         addfeature(NOTE, pitch, num*4, denom*(v->default_length));
       };
+     marknote(); /* [SS] 2019-10-13 */
      }; /* end of else block for not in chord */
    } /* end of if block for ROLL,ORNAMENT,TRILL */
    else {
@@ -4314,6 +4315,7 @@ int xoctave, n, m;
       };
     };
   };
+      /*printf(": notes = %d v->thisend = %d\n",notes,v->thisend); [SS] 2019-10-13*/
 }
 
 
@@ -4897,6 +4899,7 @@ static void tiefix()
   j = 0;
   inchord = 0;
   voiceno = 1;
+  chord_num = -1;  /* [SS] 2019-08-11 ensure it is initialized */
   while (j<notes) {
     switch (feature[j]) {
     case CHORDON:
@@ -6067,10 +6070,12 @@ int n;
     parseron();
     dotune = 1;
      
+    /* [SS] 2019-08-11
       v = newvoice(1);
       head = v;
       vaddr[0] = v;
       vaddr[v->indexno] = v;
+    */
 
     pastheader = 0;
     if (userfilename == 0) {

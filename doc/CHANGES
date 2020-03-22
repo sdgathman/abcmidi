@@ -13409,4 +13409,78 @@ Midi2abc. The handling of lyric text is currently a problem with
 midi2abc. For the present time I have added a new option -noly which
 suppresses lyric output. Introduced a new flag noly in midi2abc.c.
 
+August 02 2019
+Midi2abc -stats returns incorrect count of notes in chord.
+(This problem only affects midiexplorer.tcl.)
+Analysis: chords are identified in stats_noteon by comparing the
+Mf_currtime with the last_tick time. last_tick is also used to
+compute the note length and is also updated in stats_noteoff.
+Fix: introduced last_on_tick array which is only updated by
+stats_noteon.
+
+August 11 2019
+
+Abc2midi - valgrind detected a memory leak coming from store.c.
+Analysis: event_refno in store.c creates a voice struct, but
+it is destroyed without freeing up the the memory in startfile().
+Fix: it is not necessary to create the voice in event_refno,
+since the function getvoicecontext(1) in event_key() will create
+the voice the voice struct automatically if it does not exist.
+The function clearvoicecontext() frees up all the voice structs
+properly. 
+
+Abc2midi - valgrind detected that the variable chord_num was
+used in a conditional prior to being set in tiefix(). The
+variable is now initialized.
+
+Both of these bugs were reported by James Cowgill to Debian
+Bug Report log 890250
+(https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=890250 )
+
+yaps - valgrind detected that i was not set in the conditional
+      if ((n->beaming == endbeam)||(i==64)) {
+in beamline() in drawtune.c when called from finalsizeline().
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=890250
+fix: initialized i to 0 in beamline().
+
+midi2abc -  Integer overflow leading to heap buffer overflow
+in addstring().
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=924947
+Fix: limited the checkmalloc to 1024 sized string.
+
+October 13 2019
+
+abc2midi: trill broken rhythm interference. Abc2midi returns the
+following message when applied to this file.
+
+X: 1
+T: trill
+M: 4/4
+L: 1/4
+K: C
+A3A|Te>dc2|
+
+Warning in line-char 6-10 : Track 0 Bar 1 has 7/2 units instead of 4
+
+In actual fact the broken rhythm is applied to the second A
+and e instead of e and d.  When the trill is removed, the program
+runs normally. Fix: in event_note in store.c all call to marknote()
+was added at the end of the conditional block beginning with
+  if ((decorators[ROLL]) || (decorators[ORNAMENT]) || (decorators[TRILL])) {
+to ensure that the start and end of the broken rhythm sequence is
+correct.
+
+
+November 06 2019 November 13 2019
+
+midi2abc: modified output for -midigram output. The header record
+now returns miditype ntrks and ppqn. The program line returns
+the current time in ticks. The changes were introduces to support
+the function show_prog_structure in runabc.tcl.
+
+
+
+
+
+
 

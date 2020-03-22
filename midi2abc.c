@@ -45,7 +45,7 @@
  * based on public domain 'midifilelib' package.
  */
 
-#define VERSION "3.37 July 12 2019"
+#define VERSION "3.41 November 13 2019"
 
 /* Microsoft Visual C++ Version 6.0 or higher */
 #ifdef _MSC_VER
@@ -229,6 +229,7 @@ struct dlistx {
 int notechan[2048],notechanvol[2048]; /*for linking on and off midi
 					channel commands            */
 int last_tick[17]; /* for getting last pulse number in MIDI file */
+int last_on_tick[17]; /* for detecting chords [SS] 2019-08-02 */
 
 char *title = NULL; /* for pasting title from argv[] */
 char *origin = NULL; /* for adding O: info from argv[] */
@@ -362,9 +363,16 @@ char* addstring(s)
 char* s;
 {
   char* p;
+  int numbytes;
 
   /* p = (char*) checkmalloc(strlen(s)+1); */
-  p = (char*) checkmalloc(strlen(s)+2); /* [SS] 2019-04-13 */
+  /* Integer overflow leading to heap buffer overflow in midi2abc
+   * Debian Bug report log #924947 [SS] 2019-08-11
+   * https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=924947
+   */
+  numbytes = strlen(s)+2; /* [SS] 2019-08-11 */
+  if (numbytes > 1024) numbytes = 1024; /* [SS] 2019-08-11 */
+  p = (char*) checkmalloc(numbytes); /* [SS] 2019-04-13  2019-08-11*/
   strncpy(p, s,strlen(s)+2); /* [SS] 2017-08-30 */
   return(p);
 }
@@ -962,7 +970,7 @@ int xformat, ntrks, ldivision;
 {
     division = ldivision; 
     format = xformat;
-    printf("Header %d %d\n",format,ntrks);
+    printf("Header %d %d %d\n",format,ntrks,ldivision); /*[SS] 2019-11-13 */
 }
 
 
@@ -1051,7 +1059,9 @@ int close_note(int chan, int pitch, int *initvol)
 }
 
 void print_txt_program(int chan,int program) {
-  printf("Program  %2d %d \n",chan+1, program);
+  /* [SS] 2019-11-06 */
+  printf("%ld Program  %2d %d \n",Mf_currtime,chan+1, program);
+  /*printf("Program  %2d %d \n",chan+1, program);*/
   }
 
 /* mftext mode */
@@ -1322,6 +1332,7 @@ void stats_trackstart()
      trkdata.chordcount[i] = 0;
      trkdata.cntlparam[i] = 0;
      last_tick[i] = -1;
+     last_on_tick[i] = -1;
      }
   printf("trk %d \n",tracknum);
 }
@@ -1357,9 +1368,11 @@ int chan, pitch, vol;
     return;
     }
  trkdata.notemeanpitch[chan+1] += pitch;
- if (abs(Mf_currtime - last_tick[chan+1]) < chordthreshold) trkdata.chordcount[chan+1]++;
- else trkdata.notecount[chan+1]++;
- if(Mf_currtime > last_tick[chan+1]) last_tick[chan+1] = Mf_currtime;
+ if (abs(Mf_currtime - last_on_tick[chan+1]) < chordthreshold) trkdata.chordcount[chan+1]++;
+ else trkdata.notecount[chan+1]++; /* [SS] 2019-08-02 */
+ last_tick[chan+1] = Mf_currtime;
+ last_on_tick[chan+1] = Mf_currtime; /* [SS] 2019-08-02 */
+ /* last_on_tick not updated by stats_noteoff */
  if (chan == 9) {
    if (pitch < 0 || pitch > 81) 
          printf("****illegal drum value %d\n",pitch);
@@ -3815,7 +3828,7 @@ int argc;
     printf("         -stats summary and statistics output\n"); 
     printf("         -ver version number\n");
     printf("         -d <number> debug parameter\n");
-    printf(" None or only one of the options -gu, -b, -Q -u should\n");
+    printf(" None or only one of the options -aul -gu, -b, -Q -u should\n");
     printf(" be specified. If none are present, midi2abc will uses the\n");
     printf(" the PPQN information in the MIDI file header to determine\n");
     printf(" the suitable note length. This is the recommended method.\n");

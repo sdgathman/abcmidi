@@ -2379,6 +2379,10 @@ static void beamline(struct feature* ft)
   int i, j;
   int ingrace;
 
+  
+  i = 0; /* [SS] 2019-08-11 not set in conditional line 2426 when
+  beamline() is called from finalsizeline()
+  https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=890250 */
   p = ft;
   ingrace = 0;
   lastchord = NULL;
