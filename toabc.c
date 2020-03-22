@@ -21,7 +21,7 @@
 
 /* back-end for outputting (possibly modified) abc */
 
-#define VERSION "2.03 January 03 2020 abc2abc"
+#define VERSION "2.04 January 22 2020 abc2abc"
 
 /* for Microsoft Visual C++ 6.0 or higher */
 #ifdef _MSC_VER
@@ -101,6 +101,7 @@ int usekey = 0;
 int drumchan=0; /* flag to suppress transposition */
 int noplus; /* flag for outputting !..! instructions instead of +...+ */
 int xmatch = -1; /* selected tune to process  [SS] 2017-07-10 */
+char* clef = ""; /* [SS] 2020-01-22 */
 
 extern int nokey; /* signals no key signature assumed */
 extern int nokeysig; /* signals -nokeys or -nokeysf option */
@@ -526,6 +527,7 @@ char** filename;
     printf("  -nokeyf No key signature. Use flats\n");
     printf("  -u to update notation ([] for chords and () for slurs)\n");
     printf("  -usekey n Use key signature sf (sharps/flats)\n");
+    printf("  -useclef (treble or bass)\n"); /* [SS] 2020-01-22 */
     printf("  -d to notate with doubled note lengths\n");
     printf("  -v to notate with halved note lengths\n");
     printf("  -V X[,Y...] to output only voices X,Y...\n");
@@ -664,6 +666,13 @@ char** filename;
      if (usekey >5) usekey = 5;
      setup_sharps_flats (usekey);
      }
+
+  targ = getarg("-useclef",argc,argv); /* [SS] 2020-01-22 */
+  if (targ != -1) {
+     clef = addstring(argv[targ]);
+     printf("clef = %s\n",clef);
+     }
+
   if (getarg("-OCC",argc,argv) != -1) oldchordconvention=1;
   /*if (getarg("-noplus",argc,argv) != -1) noplus = 1; [SS] 2012-06-04*/
 
@@ -1595,13 +1604,16 @@ int explict;
 
       else if (usekey == 0) emit_string("none"); 
       else emit_string(keys[usekey+5]);
+    };
+    /* [SS] 2020-01-22  only works with transpose */
+    if (strlen(clef) > 0) {
+	    emit_string_sprintf(" clef=%s",clef);
+       } else {
       if (gotclef) {
         emit_string(" ");
+        emit_string_sprintf("clef=%s", clefname);
       };
-    };
-    if (gotclef) {
-      emit_string_sprintf("clef=%s", clefname);
-    };
+    }
     if (gotoctave) {
       emit_int_sprintf(" octave=%d", octave);
     };

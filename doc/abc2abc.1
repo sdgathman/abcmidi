@@ -6,7 +6,8 @@ abc2abc \- a simple abc checker/re-formatter/transposer
 [ \fB-r\fP ] [ \fB-e\fP ] [ \fB-t \fP\fIsemitones\fP ] [ \fB-nda\fP ]
 [ \fB-u\fP ] [ \fB-d\fP ] [ \fB-v\fP ] [ \fB-V\fP\fIvoice number\fP]
 [\fB-P\fP\fivoice number\fp] [\fB-nokeys\fP]
-[ \fB-nokeyf\fP] [ \fB-usekey\fP\fI(sharps/flats)\fP] [ \fB-OCC\fP ]
+[ \fB-nokeyf\fP] [ \fB-usekey\fP\fI(sharps/flats)\fP]
+[\fB-useclef\fP\fI(treble/clef)\fP] [ \fB-OCC\fP ]
 .SH "DESCRIPTION"
 .PP
 .B abc2abc
@@ -103,6 +104,11 @@ This will force abc2abc to output the notes in the key signature
 keys[sf] where sf specifies the number of flats (\-negative) or 
 sharps (+positive) in the key signature. It is a number between
 \-5 and +5 inclusive.
+.TP
+.B \-useclef
+This works with only the -t (transpose) and provided the abc
+file does not already have a clef command in the K: field. It
+does not support voices.
 .PP
 * Normally abc2abc will convert the deprecated notation for
 decorations (eg. !ppp!) to the abc version 2.0 draft standard (eg. +ppp+).
@@ -114,4 +120,4 @@ If you do not wish to change to this standard include the \-OCC flag.
 This manual page was written by Anselm Lingnau <lingnau@tm.informatik.uni-frankfurt.de> and is now supported by Seymour Shlien <fy733@ncf.ca>
 for the GNU/Linux system.
 .SH VERSION
-This man page describes abc2abc version 1.64 from June 07 2011.
+This man page describes abc2abc version 2.04 from January 22 2020.

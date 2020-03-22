@@ -2,7 +2,7 @@ abcMIDI :   abc <-> MIDI conversion utilities
 
 midi2abc version 3.43 January 06 2020
 abc2midi version 4.27 January 14 2020
-abc2abc  version 2.03 January 03 2020
+abc2abc  version 2.04 January 22 2020
 yaps     version 1.74 January 03 2020
 abcmatch version 1.73 June 06 2019
 midicopy version 1.35 January 05 2019
@@ -347,6 +347,8 @@ Usage: abc2abc <filename> [-s] [-n X] [-b] [-r] [-e] [-t X]
   -nokeys No key signature (i.e. K: none). Use sharps.
   -nokeyf No key signature (i.e. K: none). Use flats.
   -u to update notation ([] for chords and () for slurs)
+  -usekey n Use key signature sf (sharps/flats)
+  -useclef (treble or bass)
   -d to notate with doubled note lengths
   -v to notate with halved note lengths
   -V X[,Y...] to output only voice X,Y...

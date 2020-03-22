@@ -13562,3 +13562,10 @@ if (tnote_denom <= 0) {
 
 in function writetrack().
 
+January 22 2020
+
+abc2abc: added -useclef option, to specify the clef to use. It is
+useful if you are trying to learn to read the bass clef and you are
+transposing the music down an octave.
+
+
