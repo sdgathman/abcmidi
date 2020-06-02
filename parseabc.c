@@ -87,7 +87,7 @@ int inhead, inbody;
 int parserinchord;
 int ingrace = 0;
 int chorddecorators[DECSIZE];
-char decorations[] = ".MLRH~Tuv";
+char decorations[] = ".MLOPRSH~Tuv";
 char *abbreviation[SIZE_ABBREVIATIONS];
 
 int voicecodes = 0;
@@ -2731,6 +2731,8 @@ parsemusic (field)
               else
 	        event_split_voice ();
 	        break;
+
+
 	    default:
 	      {
 		char msg[40];
@@ -2772,10 +2774,11 @@ parseline (line)
   if (strcmp(line,"%%endtext") == 0) {
 	  ignore_line = 0;
           }
+
+  handle_abc2midi_parser (line);  /* [SS] 2020-03-25 */
   if (ignore_line == 1 && fileprogram == ABC2MIDI) return;
 
-  handle_abc2midi_parser (line);  /* [SS] 2017-04-12 */
-  /* if (ignore_line == 1) return;  [SS] 2017-04-12 */
+  /* handle_abc2midi_parser (line);   [SS] 2017-04-12  2020-03-25 */
  if (ignore_line == 1) { /* [JM] 2018-02-22 */
         /* JM 20180219 Do a flush of the blocked lines in case of MidiOff
            and abc2abc */

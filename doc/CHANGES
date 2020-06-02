@@ -13574,3 +13574,54 @@ February 12 2020
 abc2midi: minor changes suggested by Timm Reasbeck to the default gchord
 patterns for various meters were incorporated in setbeat() in store.c.
 
+
+March 25 2020
+
+abc2midi: after the changes to parseabc.c on January 03 2020, abc2midi
+no longer sees the %%MidiOn command. For example:
+
+X:1
+T:Tune with Repeat Text, MidiOff and MidiOn
+M:4/4
+L:1/8
+K:C
+C4 D4 | E4 F4 | \
+%%MidiOff
+["Repeat" \
+%%MidiOn
+G4 A4 | B4 c4 |]
+
+only the first 4 notes are recorded in the midi file. 
+
+
+Fix: in parseline() in parseabc.c, switched the order of the lines
+
+ handle_abc2midi_parser (line);  /* [SS] 2020-03-25 */
+
+ if (ignore_line == 1 && fileprogram == ABC2MIDI) return;
+
+
+April 30 2020
+
+abc2midi: reports warnings
+Warning in line-char 6-0 : Ignoring reserved character S
+Warning in line-char 6-3 : Ignoring reserved character P
+Warning in line-char 6-7 : Ignoring reserved character O
+when it encounters the characters S, P, and O in the music body.
+
+X:1
+T: decorations
+M: 4/4
+L: 1/4
+K: G
+SDBPAD|OBDEF|
+
+The abc standard defines S as segno, P as uppermordent, and O as
+coda, so these are completely valid.
+
+Fix: add characters O,P and S to the decorations string in
+parseabc.c. It is now
+char decorations[] = ".MLOPRSH~Tuv"; /* [SS] 2020-04-30 */
+
+
+
