@@ -87,7 +87,7 @@ int inhead, inbody;
 int parserinchord;
 int ingrace = 0;
 int chorddecorators[DECSIZE];
-char decorations[] = ".MLOPRSH~Tuv";
+char decorations[] = ".MLRH~Tuv'OPS"; /* 2020-05-01 */
 char *abbreviation[SIZE_ABBREVIATIONS];
 
 int voicecodes = 0;
@@ -605,28 +605,32 @@ isclef (s, gotoctave, octave, strict)
 /* alto, mezzo, soprano or K:clef=arbitrary                          */
 {
   int gotclef;
-
   s = s;
   gotclef = 0;
   if (strncmp (s, "bass", 4) == 0)
     {
       gotclef = 1;
+      *octave = 0; /* [SS] 2020-05-06 */
     };
   if (strncmp (s, "treble", 6) == 0)
     {
       gotclef = 1;
-      if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)
+      /* [SS] 2020-05-06 */
+      /*if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)*/
+      if (fileprogram == ABC2MIDI)
         {
         /* [SS] 2015-07-02  2019-01-20*/
 	/* event_warning ("clef= is overriding octave= setting"); */
         *gotoctave = 1;		/* [SS] 2011-12-19 */
-        *octave = 0;
+        *octave = 0; /* [SS] 2020-05-06 */
         }
     };
   if (strncmp (s, "treble+8", 8) == 0)
     {
       gotclef = 1;
-      if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)
+      /* [SS] 2020-05-06 */
+      /*if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)*/
+      if (fileprogram == ABC2MIDI)
         {
 	/* event_warning ("clef= is overriding octave= setting"); */
         /* [SS] 2015-07-02 2019-01-20 */
@@ -637,7 +641,9 @@ isclef (s, gotoctave, octave, strict)
   if (strncmp (s, "treble-8", 8) == 0)
     {
       gotclef = 1;
-      if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1)
+      /* [SS] 2020-05-06 */
+      /*if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1)*/
+      if (fileprogram == ABC2MIDI)
         {
 	/* event_warning ("clef= is overriding octave= setting"); */
         *gotoctave = 1;
@@ -647,16 +653,20 @@ isclef (s, gotoctave, octave, strict)
   if (strncmp (s, "baritone", 8) == 0)
     {
       gotclef = 1;
+      *octave = 0; /* [SS] 2020-05-06 */
     };
   if (strncmp (s, "tenor", 5) == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     };
   if (strncmp (s, "tenor-8", 7) == 0)
     {
       gotclef = 1;
-      if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1) {
-	event_warning ("clef= is overriding octave= setting");
+      /* [SS] 2020-05-06 */
+      /*if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1) {*/
+      if (fileprogram == ABC2MIDI) {
+	/*event_warning ("clef= is overriding octave= setting");*/
         *gotoctave = 1;
         *octave = -1;
         }
@@ -664,14 +674,17 @@ isclef (s, gotoctave, octave, strict)
   if (strncmp (s, "alto", 4) == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     };
   if (strncmp (s, "mezzo", 5) == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     };
   if (strncmp (s, "soprano", 7) == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     };
 /*
  * only clef=F or clef=f is allowed, or else
@@ -682,22 +695,27 @@ isclef (s, gotoctave, octave, strict)
   if (strncmp (s, "f", 1) == 0 && strict == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     }
   if (strncmp (s, "F", 1) == 0 && strict == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     }
   if (strncmp (s, "g", 1) == 0 && strict == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     }
   if (strncmp (s, "G", 1) == 0 && strict == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     }
   if (strncmp (s, "perc", 1) == 0 && strict == 0)
     {
       gotclef = 1;
+      *octave=0;  /* [SS] 2020-05-06 */
     }				/* [SS] 2011-04-17 */
 
   if (!strict && !gotclef)

@@ -13621,7 +13621,44 @@ coda, so these are completely valid.
 
 Fix: add characters O,P and S to the decorations string in
 parseabc.c. It is now
-char decorations[] = ".MLOPRSH~Tuv"; /* [SS] 2020-04-30 */
+char decorations[] = ".MLRH~TuvOPS";
+In addition, DECSIZE in abc.h was increased to 13 and I added
+#define CODA 10
+#define UPPERMORDENT 11
+#define SEGNO 12
+
+May 06 2020
+
+abc2midi: bug
+The command clef=treble+8 or clef=treble-8 fails to have any
+effect. This bug was probably introduced on December 19 2011
+and was just reported recently.
+Analysis: the bug was traced to the code in the function
+isclef() in parseabc.c. The code was modified on December 19 2011
+to fix another bug. The modification contains the line
+
+ if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1) 
+
+which causes the problem. Prior to this test, the input string
+was matched to 'treble' and *gotoctave was set to 1. The string
+also matched 'treble+8', but *octave could not be reset to 1
+on account of the above modification.
+
+I see no purpose in the test *gotoctave != 1 or *octave != 1
+in the above test, so I changed it to simply to
+
+ if (fileprogram == ABC2MIDI)
+
+wherever it occurred.  This enabled the code for clef=treble+8 
+and clef=treble-8. It was found that it was still possible to
+switch back from clef=treble+8 to clef=treble.
+
+Unfortunately, the clef=treble+8, affects other designations
+such as clef=tenor. It was therefore necessary to reset
+*octave = 0. For all these situations and similar.
 
 
+
+
+ 
 

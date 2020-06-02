@@ -95,7 +95,7 @@ EFFECT
 } featuretype;
 
 /* note decorations */
-#define DECSIZE 10
+#define DECSIZE 13
 extern char decorations[];
 #define STACCATO 0
 #define TENUTO 1
@@ -107,6 +107,9 @@ extern char decorations[];
 #define BOWUP 7
 #define BOWDOWN 8
 #define BREATH 9
+#define CODA 10 
+#define UPPERMORDENT 11
+#define SEGNO 12
 
 /* The vstring routines provide a simple way to handle */
 /* arbitrary length strings */
