@@ -38,6 +38,7 @@
 #include "abc.h"
 #include "structs.h"
 #include "sizes.h"
+#include "parseabc.h"	/* global ingrace defined here */
 #include "drawtune.h"
 
 /* external functions  and variables */
@@ -75,7 +76,7 @@ int beamctr, gracebeamctr;;
 int rootstem;
 int fontsize, fontnum;
 int donemeter;
-int ingrace, inchord;
+int inchord;
 int chordcount;
 struct feature* chordhead;
 
@@ -1027,7 +1028,7 @@ static void spacechord(struct feature* chordplace)
   struct feature* place;
   struct note* anote;
   int thisy, lasty, lastflip;
-  int stemdir;
+  int stemdir = 0;
   int doneflip;
   int ygap[10];
   int accplace;
@@ -2380,7 +2381,7 @@ static void beamline(struct feature* ft)
   int ingrace;
 
   
-  i = 0; /* [SS] 2019-08-11 not set in conditional line 2426 when
+  i = j = 0; /* [SS] 2019-08-11 not set in conditional line 2426 when
   beamline() is called from finalsizeline()
   https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=890250 */
   p = ft;

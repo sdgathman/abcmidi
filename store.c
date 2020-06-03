@@ -1248,7 +1248,6 @@ while (j<=maxnotes) {
     case VOICE:
        if (pitch[j] != indexno) 
           j = locate_voice(j,indexno);
-          break;
        break;
     case CHORDON:
        insidechord = 1;
@@ -2174,7 +2173,7 @@ char *s;
   /* [HL] 2015-05-15 */
   else if (strcmp(command, "temperamentequal") == 0) {
       double octave_cents;
-      int acc_size;
+      int acc_size = -1;
       int narg, ndiv, fifth_index, sharp_steps;
       narg = sscanf(p," %d %lf %d %d ",&ndiv, &octave_cents, &fifth_index, &sharp_steps);
       switch (narg) {
@@ -2662,7 +2661,7 @@ char *f;
       {
         char* p; 
         p = f;
-        strncpy(rhythmdesignator,f,32); /* [SS] 2011-08-19 */
+        strncpy(rhythmdesignator,f,sizeof rhythmdesignator - 1); /* [SS] 2011-08-19 */
         skipspace(&p);
         if (((strncmp(p, "Hornpipe", 8) == 0) ||
             (strncmp(p, "hornpipe", 8) == 0)) &&
@@ -2675,7 +2674,7 @@ char *f;
       break;
     default:
       {
-        char buff[256];
+        char buff[258];
         
         if (strlen(f) < 256) {
           sprintf(buff, "%c:%s", k, f);
@@ -2785,7 +2784,7 @@ struct vstring* part;
   int i, j, k, spec_length;
   int stackptr;
   char* stack[10];
-  char lastch;
+  char lastch = ' ';
   char errmsg[80];
 
   stackptr = 0;
@@ -2990,7 +2989,7 @@ return 0;
 int is_abcm2ps_option (s) /* [SS] 2018-12-17 */
 char *s;
 {
-int i,n;
+int i;
 if (s == NULL) return 0; 
 for (i=0;i< number_of_abcm2ps_options; i++) {
    if (strcasecmp(s,abcm2psoptions[i]) == 0)
@@ -3365,6 +3364,8 @@ static void brokenadjust()
       num1 = 15;
       num2 = 1;
       break;
+    default:
+      num1 = num2 = 1;
   };
   denom12 = (num1 + num2)/2;
   if (v->brokentype == LT) {
@@ -3743,11 +3744,12 @@ int *pitchbend;
     bend = 8192; /* corresponds to zero bend */
     }
 if (!microtone) *pitchbend = bend; /* don't override microtone */
-if (comma53) 
 #ifdef MAKAM
  if (comma53) fprintf(fc53,"%c%d ",note,octave+4);
 #endif
  if (comma53) convert_to_comma53 (acc,  &pitch, pitchbend); 
+ /* FIXME */
+ /* indentation implied next 3 lines should be controlled by if (comma53) */
  microtone = 0; /* [SS] 2014-01-25 */
  setmicrotone.num = 0; /* [SS] 2014-01-25 */
  setmicrotone.denom = 0;
@@ -3923,6 +3925,7 @@ bentpitch[i] = active_pitchbend;
 }
 
 
+#if 0
 static void dotrill(note, octave, n, m, pitch)
 /* applies a trill to a note */
 char note;
@@ -3965,6 +3968,7 @@ int pitch;
   };
   marknoteend();
 }
+#endif
 
 static void dotrill_setup(note, octave, n, m, pitch)
 char note;
@@ -4901,7 +4905,7 @@ static void tiefix()
 {
   int j;
   int inchord;
-  int chord_num, chord_denom;
+  int chord_num, chord_denom = 1;
   int chord_start,chord_end;
   int voiceno;
 
@@ -4987,7 +4991,7 @@ int place;
  */
 {
   int start, end, p;
-  int next_num, next_denom;
+  int next_num = 1, next_denom = 1;
   int fact_num, fact_denom;
   int grace_num, grace_denom;
   int j;
@@ -5356,7 +5360,7 @@ static void fixreps()
 /* This can be converted to |: if necessary. */
 {
   int j;
-  int rep_point; /* where to assume a repeat starts */
+  int rep_point = 0; /* where to assume a repeat starts */
   int expect_repeat;   /* = 1 after |: or ::  otherwise 0*/
   int use_next; /* if 1 set next bar line as ref_point */
   int nplays; /* counts PLAY_ON_REP associated with a BAR_REP*/

@@ -1193,10 +1193,10 @@ char** filename;
   filearg = getarg("-o", argc, argv);
   if (filearg != -1) { 
     /*strcpy(outputname, argv[filearg]); security risk buffer overflow */
-    strncpy(outputname, argv[filearg],256);
+    strncpy(outputname, argv[filearg],sizeof outputname - 1);
   } else {
     /* strcpy(outputname, argv[1]); security risk: buffer overflow */
-    strncpy(outputname, argv[1],256);
+    strncpy(outputname, argv[1],sizeof outputname - 4);
     place = strchr(outputname, '.');
     if (place == NULL) {
       strcat(outputname, ".ps");
@@ -2638,6 +2638,8 @@ static void brokenadjust()
       num1 = 15;
       num2 = 1;
       break;
+    default:
+      num1 = num2 = 1;
   };
   denom12 = (num1 + num2)/2;
   if (cv->brokentype == LT) {
@@ -2812,6 +2814,7 @@ void event_chordoff(int chord_n, int chord_m)
     thechord->base = firstnote->base;
     thechord->base_exp = firstnote->base_exp;
   } else {
+    thechord = NULL;
     event_error("mis-formed chord");
   };
   

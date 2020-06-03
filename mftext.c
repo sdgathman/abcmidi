@@ -31,6 +31,7 @@ int filegetc()
 extern int arg_index;
 
 int main(argc,argv)
+int argc;
 char **argv;
 {
   FILE *efopen();
@@ -256,6 +257,7 @@ int hr, mn, se, fr, ff;
 }
 
 void txt_arbitrary(leng,mess)
+int leng;
 char *mess;
 {
   prtime();

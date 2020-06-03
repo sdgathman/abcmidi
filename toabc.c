@@ -85,7 +85,6 @@ int orig_key_number; /* used for gchord transposition */
 int new_key_number;  /* used for gchord transposition */
 int oldtable[7], newtable[7]; /* for handling transposition */
 int inchord; /* are we in a chord [ ] ? */
-int ingrace; /* are we in a grace note set { } ? */
 int chordcount; /* number of notes or rests in current chord */
 int inlinefield; /* boolean - are we in [<field>: ] ? */
 int cleanup; /* boolean to indicate -u option (update notation) */
@@ -416,6 +415,7 @@ enum abctype t;
   return(p);
 }
 
+#if 0
 static int nextnotes()
 /* return the number of notes in the next bar */
 /* part of new linebreak option (-n) */
@@ -436,6 +436,7 @@ static int nextnotes()
   };
   return(n);
 }
+#endif
 
 static void reduce(a, b)
 int *a, *b;
@@ -2221,7 +2222,7 @@ int *octave, *mult;
     *octave = xoctave;
     } else {
     int val, newval;
-    int acc;
+    int acc = 0;
     char *anoctave = "cdefgab";
 
     *octave = xoctave;
@@ -2248,6 +2249,7 @@ int *octave, *mult;
         acc = 0;
         break;
       default:
+	acc = 0;
         event_error("Internal error");
       };
       acc = acc - oldtable[(int)anoctave[val] - (int)'a'] + 
@@ -2290,7 +2292,7 @@ int xoctave, n, m;
     octave = xoctave;
   } else {
     int val, newval;
-    int acc;
+    int acc = 0;
     char *anoctave = "cdefgab";
 
     octave = xoctave;
@@ -2628,7 +2630,7 @@ void printpitch(int pitch)
 /* convert midi pitch value to abc note */
 {
 int p;
-char keylet,symlet;
+char keylet,symlet = '=';
 int keynum,symcod;
 char string[16];
 p = pitch%12;
