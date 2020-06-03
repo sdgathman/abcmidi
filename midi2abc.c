@@ -373,7 +373,7 @@ char* s;
   numbytes = strlen(s)+2; /* [SS] 2019-08-11 */
   if (numbytes > 1024) numbytes = 1024; /* [SS] 2019-08-11 */
   p = (char*) checkmalloc(numbytes); /* [SS] 2019-04-13  2019-08-11*/
-  strncpy(p, s,strlen(s)+2); /* [SS] 2017-08-30 */
+  strncpy(p, s,numbytes); /* [SS] 2017-08-30 */
   return(p);
 }
 
@@ -833,7 +833,7 @@ char *mess;
     } 
     else {
       if (leng < BUFFSIZE - 3) {
-        sprintf(buffer2, " %s", textbuff); 
+        snprintf(buffer2, sizeof buffer2, " %s", textbuff); 
         addtext(buffer2,type); /* [SS] 2019-07-12 */
       };
     };
@@ -1086,7 +1086,7 @@ int prtime(int units)
 
 char * pitch2key(int note)
 {
-static char name[5];
+static char name[16];
 char* s = name;
   switch(note % 12)
   {
@@ -1173,7 +1173,7 @@ for (i=0;i<128;i++) {
 
 /* [SS] 2018-04-24 */
 void output_progs_data () {
-int i,nprogs;
+int i;
 /* check that there is valid progactivity */
 
   printf("progs ");
@@ -1188,8 +1188,7 @@ int i,nprogs;
 
 void stats_finish()
 {
-int i,sum;
-int p;
+int i;
 int npulses;
 int nprogs;
 
@@ -1304,7 +1303,6 @@ if (sum != 0) {
 
 void output_track_summary () {
 int i;
-int p,n;
 /* find first channel containing data */
 for (i=0;i<17;i++) {
    if(trkdata.notecount[i] == 0 && trkdata.chordcount[i] == 0) continue; 
@@ -1643,7 +1641,7 @@ void stats_metatext(type,leng,mess)
 int type, leng;
 char *mess;
 {
-int i,b;
+int i;
 if (type != 3) return;
 printf("metatext %d ",type);
 for (i=0;i<leng;i++) printf("%c",mess[i]);
@@ -2895,7 +2893,7 @@ int activesplit,nsplits;
 int done;
 struct listx* i;
 int k;
-int firstposnum;
+int firstposnum = 0;
 /* initializations */
 activesplit = 0;
 nsplits = 0;

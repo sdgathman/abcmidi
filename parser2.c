@@ -26,7 +26,6 @@ char* s;
   char* newword;
   char* lastnewword;
   char* ptr;
-  char errmsg[80];
   int doval;
 
   ptr = s;

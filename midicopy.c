@@ -610,7 +610,6 @@ readtrack ()
   int needed;
   long varinum;
   int i;                        /* [SS] 2017-10-19 */
-  int chan;
   double delta_seconds;
 
   for (i=0;i<17;i++) haschannel[i] = 0;
@@ -1401,7 +1400,6 @@ mf_write_track_chunk (which_track, fp)
   long trkhdr, trklength;
   void write16bit (), write32bit ();
   void WriteVarLen ();
-  int ier;
 
 
   trkhdr = MTrk;
@@ -1678,7 +1676,7 @@ eputc (char c)
 int
 seconds_to_tick (float seconds)
 {
-  int i, ind;
+  int i, ind = 0;
   float tick, fraction;
   for (i = 0; i < temposize; i++)
     {
@@ -1707,7 +1705,7 @@ seconds_to_tick (float seconds)
 float
 tick_to_seconds (int tick)
 {
-  int i, ind;
+  int i, ind = 0;
   float seconds;
   float delta;
   long tempo;

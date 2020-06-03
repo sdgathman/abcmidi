@@ -166,9 +166,9 @@ addstring (s)
 char * concatenatestring(s1,s2)
    char * s1;
    char * s2;
-{  char *p;
-  p = (char *) checkmalloc (strlen(s1) + strlen(s2) + 1);
-  snprintf(p,sizeof p, "%s%s",s1,s2);
+{  int len = strlen(s1) + strlen(s2) + 1;
+   char *p = (char *) checkmalloc (len);
+  snprintf(p,len, "%s%s",s1,s2);
   return p;
 }
 
@@ -340,8 +340,8 @@ isnumberp (p)
   c = p;
   while (( **c != ' ') && ( **c != TAB) &&  **c != '\0')
     {
-      if (( *c >= 0) &&  (*c <= 9))
-	*c = *c + 1;
+      if (( **c >= 0) &&  (**c <= 9))
+	*c += 1;
       else
 	return 0;
     }
@@ -1132,7 +1132,7 @@ parsekey (str)
 {
   char *s;
   char word[30];
-  int parsed;
+  int parsed = 0;
   int gotclef, gotkey, gotoctave, gottranspose;
   int explict;			/* [SS] 2010-05-08 */
   int modnotes;			/* [SS] 2010-07-29 */
@@ -1176,6 +1176,7 @@ parsekey (str)
       modmicrotone[i].num = 0;	/* [SS] 2014-01-06 */
       modmicrotone[i].denom = 0;
     };
+  word[0] = 0; /* in case of empty str */
   while (*s != '\0')
     {
       parsed = parseclef (&s, word, &gotclef, clefstr, &cgotoctave, &coctave);
@@ -2096,7 +2097,7 @@ parsefield (key, field)
       {
 	int num, denom;
 
-	strncpy (timesigstring, place, 16);	/* [SS] 2011-08-19 */
+	strncpy (timesigstring, place, sizeof timesigstring - 1);	/* [SS] 2011-08-19 */
 	if (strncmp (place, "none", 4) == 0)
 	  {
 	    event_timesig (4, 4, 0);
@@ -2478,9 +2479,10 @@ parsemusic (field)
 		case '|':
 		  p = p + 1;
 		  event_bar (THICK_THIN, "");
-		  if (*p == ':')   /* [SS] 2015-04-13 */
+		  if (*p == ':') {   /* [SS] 2015-04-13 */
 		      event_bar (BAR_REP, "");
 		      p = p + 1;
+		  }
 		  break;
 		default:
 		  if (isdigit (*p))
@@ -2748,7 +2750,7 @@ parsemusic (field)
                  }
               else
 	        event_split_voice ();
-	        break;
+	      break;
 
 
 	    default:
@@ -2916,7 +2918,7 @@ parsefile (name)
   FILE *fp_last,*fp_include; /* [SS] 2017-12-10 */
   int reading;
   int fileline;
-  int last_position;
+  int last_position = 0;
   struct vstring line;
   /* char line[MAXLINE]; */
   int t;

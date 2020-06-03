@@ -458,7 +458,7 @@ void note_effect5(chan)
        to the MIDI file.
     */
     struct eventstruc eventlist[1024]; /* extended to 1000 2015-10-03 */
-    int delta,notetime,pitchbend;  
+    int delta = 0,notetime,pitchbend;  
     int last_delta; /* [SS] 2017-06-10 */
     int initial_bend; /* [SS] 2015-08-25 */
     int i,j;

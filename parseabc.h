@@ -74,7 +74,8 @@ extern void print_inputline_nolinefeed();
 extern void parseron();
 extern void parseroff();
 
-extern int lineno;
+extern int lineno;  /* FIXME: overloaded with item pointers */
+extern int ingrace; /* are we in a grace note set { } ? */
 
 /* event_X() routines - these are called from parseabc.c       */
 /* the program that uses the parser must supply these routines */

@@ -1884,7 +1884,6 @@ int noteson;
 {
   char* p;
   char command[40];
-  char inputfile[256]; /* [SS] 2011-07-04 */
   int done;
   int val;
   int i;

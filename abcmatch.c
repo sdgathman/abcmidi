@@ -197,7 +197,7 @@ make_note_representation (int *nnotes, int *nbars, int maxnotes, int maxbars,
   float fract;
   int i;
   int skip_rests, multiplier, inchord, ingrace;
-  int maxpitch;
+  int maxpitch = 0;
   *nnotes = 0;
   *nbars = 0;
   inchord = 0;
@@ -910,13 +910,11 @@ match_any_bars (int tpbars, int barnum, int delta_key, int nmatches)
 	{
 
 	  dif = match_samples (msamples[j], mpitch_samples + moffset);
-/* debugging 
+#if 0 /* debugging  */
           printf("bar %d\n",j);
           print_bar_samples(msamples[j],mpitch_samples+moffset);
           /*printf("dif = %d\n\n",dif);*/
-
-
-
+#endif
 	  moffset += msamples[j];
 	  if (dif == 0)
 	    {
@@ -1192,6 +1190,8 @@ analyze_abc_file (char *filename)
     case interval_pdf:
       print_interval_pdf ();
       break;
+    default:
+      ;
     }
   return (0);
 }
