@@ -184,7 +184,7 @@ int main()
 
  */
 
-#define VERSION "4.32 May 06 2020 abc2midi" 
+#define VERSION "4.36 June 28 2020 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -268,11 +268,12 @@ int propagate_accidentals = 2; /* [SS] 2015-08-18 */
 int active_pitchbend;
 extern struct fraction setmicrotone; /* [SS] 2014-01-07 */
 extern int microtone;
-int temperament = 0;
+extern int temperament;  /* [SS] 2020-06-25 */
 #define SEMISIZE 4096
 int octave_size = 12*SEMISIZE;
 int fifth_size = 7*SEMISIZE; /* default to 12-edo */
 int sharp_size = SEMISIZE; /* [HL] 2015-05-15] */
+int microstep_size = SEMISIZE; /* [HL] 2020-06-20 */
 int started_parsing=0;
 int v1index= -1;
 int ignore_fermata = 0; /* [SS] 2010-01-06 */
@@ -973,7 +974,7 @@ char **filename;
     if (argc > arg) {
        n = sscanf(argv[arg],"%f",&afreq);
        }
-    if (n < 1) {printf("expecting float between 415.30 and 466.16 after -TT\n");
+    if (n < 1) {printf("expecting float between 392.0 and 466.16 after -TT\n");
                } else {
                retuning = 1;
                semitone_shift = (float) (12.0 * log10(afreq/440.0f)/log10(2.0f)); /* [SS] 2015-10-08 extra parentheses */
@@ -981,10 +982,11 @@ char **filename;
                if (semitone_shift >= 1.001) {printf("frequency %f must be less than 466.16\n",afreq);
                    retuning = 0;
                   }
-               if (semitone_shift <= -1.015) {printf("frequency %f must be greater than 415.0\n",afreq);
+               if (semitone_shift <= -2.0) {printf("frequency %f must be greater than 392.0\n",afreq);
                   retuning = 0;
                   }             
-               if (retuning) {bend = (int) (8192.0 * semitone_shift) + 8192;
+/* [SS] 2020-06-28 */
+               if (retuning) {bend = (int) (4096.0 * semitone_shift) + 8192;
                               if (bend > 16383) bend=16383;
                               if (bend < 0) bend = 0;
                               printf("bend = %d\n",bend);
@@ -1248,8 +1250,7 @@ while (j<=maxnotes) {
     case VOICE:
        if (pitch[j] != indexno) 
           j = locate_voice(j,indexno);
-          break;
-       break;
+       break;  /* [SDG] 2020-06-03 */
     case CHORDON:
        insidechord = 1;
        break;
@@ -2147,7 +2148,7 @@ char *s;
         octave_size = (int)(octave_cents*SEMISIZE/100+0.5);
         fifth_size = (int)(fifth_cents*SEMISIZE/100+0.5);
 	sharp_size = 7*fifth_size - 4*octave_size; /* [HL] 2015-05-15] */
-	
+        microstep_size = sharp_size;   /* [HL] 2020-06-20 */ 	
 	if(verbose) { /* [HL] 2015-05-15] */
 	    printf("temperamentlinear:\n"
 		   "\targs: %lf %lf\n",octave_cents, fifth_cents);
@@ -2174,7 +2175,7 @@ char *s;
   /* [HL] 2015-05-15 */
   else if (strcmp(command, "temperamentequal") == 0) {
       double octave_cents;
-      int acc_size;
+      int acc_size = -1;  /* [SDG] 2020-06-03 */
       int narg, ndiv, fifth_index, sharp_steps;
       narg = sscanf(p," %d %lf %d %d ",&ndiv, &octave_cents, &fifth_index, &sharp_steps);
       switch (narg) {
@@ -2217,7 +2218,8 @@ char *s;
       default:
 	  event_error("Bad format for temperamentequal command");
       }
-      
+      microstep_size = (int) 1.0 * octave_size/ndiv + 0.5; /* [HL] 2020-06-20 */
+ 
       sharp_size = acc_size;
 
       if(verbose) {
@@ -2238,6 +2240,8 @@ char *s;
 		 acc_size,100.0*acc_size/SEMISIZE,
 		 (int)(1.0*acc_size/octave_size*ndiv+0.5)
 		 );
+	         printf("\tmicrostep_size = %d (%.2lf cents)\n",microstep_size, 100.0*microstep_size/SEMISIZE); /* [HL] 2020-06-20*/
+
       }
       
       if (acc_size < 0)
@@ -2662,7 +2666,8 @@ char *f;
       {
         char* p; 
         p = f;
-        strncpy(rhythmdesignator,f,32); /* [SS] 2011-08-19 */
+        /* strncpy(rhythmdesignator,f,32);  [SS] 2011-08-19 */
+	snprintf(rhythmdesignator,sizeof(rhythmdesignator),"%s",f); /* [SEG] 2020-06-04 */
         skipspace(&p);
         if (((strncmp(p, "Hornpipe", 8) == 0) ||
             (strncmp(p, "hornpipe", 8) == 0)) &&
@@ -2675,7 +2680,7 @@ char *f;
       break;
     default:
       {
-        char buff[256];
+        char buff[258]; /* [SDG] 2020-06-03 */
         
         if (strlen(f) < 256) {
           sprintf(buff, "%c:%s", k, f);
@@ -2785,7 +2790,7 @@ struct vstring* part;
   int i, j, k, spec_length;
   int stackptr;
   char* stack[10];
-  char lastch;
+  char lastch =  ' '; /* [SDG] 2020-06-03 */
   char errmsg[80];
 
   stackptr = 0;
@@ -2990,7 +2995,7 @@ return 0;
 int is_abcm2ps_option (s) /* [SS] 2018-12-17 */
 char *s;
 {
-int i,n;
+int i;
 if (s == NULL) return 0; 
 for (i=0;i< number_of_abcm2ps_options; i++) {
    if (strcasecmp(s,abcm2psoptions[i]) == 0)
@@ -3365,6 +3370,8 @@ static void brokenadjust()
       num1 = 15;
       num2 = 1;
       break;
+    default:
+      num1 = num2 = 1; /* [SDG] 2020-06-03 */
   };
   denom12 = (num1 + num2)/2;
   if (v->brokentype == LT) {
@@ -3717,12 +3724,25 @@ int *pitchbend;
     p = tscale[p];
     if (acc == '^') p = p + mul*accidental_size;
     if (acc == '_') p = p - mul*accidental_size;
+
     pitch4096 =  p + octave*octave_size + middle_c;
+    
+    /* [HL] 2020-06-27 Adjust for A=440.0 with zero pitchbend */
+    pitch4096 += (9*SEMISIZE) - (3*fifth_size-octave_size);
+
 
     /* [HL] 2015-05-15 */
     if (microtone) {
 	if (setmicrotone.denom == 100) /* microtone in cents */ 
 	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * SEMISIZE);
+        else if (setmicrotone.denom == 0) { /* [HL] 2020-06-20 / 2020-06-27 */
+            /* microstep_size is accidental_size for temperamentlinear,
+             * or
+             * microstep_size is the octave fraction for temperamentequal
+             * */
+           pitch4096 += (int) (1.0 * setmicrotone.num * microstep_size);
+       }
+
 	else /* microtone relative to sharp step in the current temperament */
 	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * accidental_size);
 
@@ -3743,7 +3763,8 @@ int *pitchbend;
     bend = 8192; /* corresponds to zero bend */
     }
 if (!microtone) *pitchbend = bend; /* don't override microtone */
-if (comma53) 
+/* if (comma53) [SDG] 2020-06-03 ambiguous statement
+ * should the following lines be included in if statement? */
 #ifdef MAKAM
  if (comma53) fprintf(fc53,"%c%d ",note,octave+4);
 #endif
@@ -3923,6 +3944,8 @@ bentpitch[i] = active_pitchbend;
 }
 
 
+/* dotrill is nolonger used [SDG] 2020-06-03 */
+#if 0  
 static void dotrill(note, octave, n, m, pitch)
 /* applies a trill to a note */
 char note;
@@ -3965,6 +3988,7 @@ int pitch;
   };
   marknoteend();
 }
+#endif
 
 static void dotrill_setup(note, octave, n, m, pitch)
 char note;
@@ -4901,7 +4925,7 @@ static void tiefix()
 {
   int j;
   int inchord;
-  int chord_num, chord_denom;
+  int chord_num, chord_denom=1; /* [SDG] 2020-06-03 */
   int chord_start,chord_end;
   int voiceno;
 
@@ -4987,7 +5011,7 @@ int place;
  */
 {
   int start, end, p;
-  int next_num, next_denom;
+  int next_num = 1, next_denom = 1; /* [SDG] 2020-06-03 */
   int fact_num, fact_denom;
   int grace_num, grace_denom;
   int j;
@@ -5356,7 +5380,7 @@ static void fixreps()
 /* This can be converted to |: if necessary. */
 {
   int j;
-  int rep_point; /* where to assume a repeat starts */
+  int rep_point = 0; /* where to assume a repeat starts [SDG] 2020-06-03 */
   int expect_repeat;   /* = 1 after |: or ::  otherwise 0*/
   int use_next; /* if 1 set next bar line as ref_point */
   int nplays; /* counts PLAY_ON_REP associated with a BAR_REP*/

@@ -22,7 +22,7 @@
 /* yapstree.c - back-end for abc parser. */
 /* generates a data structure suitable for typeset music */
 
-#define VERSION "1.76 May 01 2020 yaps"
+#define VERSION "1.77 June 04 2020 yaps"
 #include <stdio.h>
 #ifdef USE_INDEX
 #define strchr index
@@ -31,6 +31,7 @@
 /* for Microsoft VC 6++ or higher */
 #ifdef _MSC_VER
 #define ANSILIBS
+#define snprintf _snprintf
 #endif
 
 #ifdef ANSILIBS
@@ -1193,10 +1194,12 @@ char** filename;
   filearg = getarg("-o", argc, argv);
   if (filearg != -1) { 
     /*strcpy(outputname, argv[filearg]); security risk buffer overflow */
-    strncpy(outputname, argv[filearg],256);
+    /* strncpy(outputname, argv[filearg],sizeof(outputname)-1);  [SDG] 2020-06-03 */
+    snprintf(outputname, sizeof(outputname)-1,"%s",argv[filearg]); /* [SDG] 2020-06-03 */
   } else {
     /* strcpy(outputname, argv[1]); security risk: buffer overflow */
-    strncpy(outputname, argv[1],256);
+    /* strncpy(outputname, argv[1],sizeof(outputname)-4);  [SDG] 2020-06-03 */
+    snprintf(outputname,sizeof(outputname)-4,"%s", argv[1]); /* [SDG] 2020-06-03 */
     place = strchr(outputname, '.');
     if (place == NULL) {
       strcat(outputname, ".ps");
@@ -2638,6 +2641,8 @@ static void brokenadjust()
       num1 = 15;
       num2 = 1;
       break;
+    default:
+      num1 = num2 = 1; /* [SDG] 2020-06-03 */
   };
   denom12 = (num1 + num2)/2;
   if (cv->brokentype == LT) {
@@ -2812,6 +2817,7 @@ void event_chordoff(int chord_n, int chord_m)
     thechord->base = firstnote->base;
     thechord->base_exp = firstnote->base_exp;
   } else {
+    thechord = NULL; /* [SDG] 2020-06-04 */
     event_error("mis-formed chord");
   };
   

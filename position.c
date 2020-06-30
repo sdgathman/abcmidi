@@ -371,7 +371,7 @@ static int spaceline(struct voice* v)
 /* returns 0 when the end of the voice is reached, 1 otherwise   */
 {
   struct feature* p;
-  double x, lastx;
+  double x, lastx = 0.0;  /* [SDG] 2020-06-03 */
   int inmusic, items;
   double itemspace;
   double gap;

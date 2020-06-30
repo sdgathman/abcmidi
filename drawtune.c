@@ -75,8 +75,9 @@ int beamctr, gracebeamctr;;
 int rootstem;
 int fontsize, fontnum;
 int donemeter;
-int ingrace, inchord;
+int inchord;
 int chordcount;
+static int ingrace; /* [SDG] 2020-06-03 */
 struct feature* chordhead;
 
 double scale, descend, totlen, oldplace;
@@ -1027,7 +1028,7 @@ static void spacechord(struct feature* chordplace)
   struct feature* place;
   struct note* anote;
   int thisy, lasty, lastflip;
-  int stemdir;
+  int stemdir =0;  /* [SDG] 2020-06-03 */
   int doneflip;
   int ygap[10];
   int accplace;
@@ -2380,9 +2381,10 @@ static void beamline(struct feature* ft)
   int ingrace;
 
   
-  i = 0; /* [SS] 2019-08-11 not set in conditional line 2426 when
+  i = j = 0; /* [SS] 2019-08-11 not set in conditional line 2426 when
   beamline() is called from finalsizeline()
   https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=890250 */
+  /* [SDG] 2020-06-03 also set j */
   p = ft;
   ingrace = 0;
   lastchord = NULL;

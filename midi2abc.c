@@ -45,10 +45,11 @@
  * based on public domain 'midifilelib' package.
  */
 
-#define VERSION "3.43 January 06 2019 midi2abc"
+#define VERSION "3.46 June 22 2020 midi2abc"
 
 /* Microsoft Visual C++ Version 6.0 or higher */
 #ifdef _MSC_VER
+#define snprintf _snprintf
 #define ANSILIBS
 #endif
 
@@ -373,7 +374,7 @@ char* s;
   numbytes = strlen(s)+2; /* [SS] 2019-08-11 */
   if (numbytes > 1024) numbytes = 1024; /* [SS] 2019-08-11 */
   p = (char*) checkmalloc(numbytes); /* [SS] 2019-04-13  2019-08-11*/
-  strncpy(p, s,strlen(s)+2); /* [SS] 2017-08-30 */
+  strncpy(p, s,numbytes); /* [SS] 2017-08-30 [SDG] 2020-06-03 */
   return(p);
 }
 
@@ -743,10 +744,8 @@ int chan, msb, lsb;
 void txt_program(chan,program)
 int chan, program;
 {
-/*
-  sprintf(textbuff, "%%%%MIDI program %d %d",
-         chan+1, program);
-*/
+/* suppress the %%MIDI program for channel 10 */
+  if (chan == 9) return;  /* [SS] 2020-02-17 */
   sprintf(textbuff, "%%%%MIDI program %d", program);
   addtext(textbuff,0);
 /* abc2midi does not use the same channel number as specified in 
@@ -760,10 +759,7 @@ int chan, program;
 void txt_program_type0(chan,program)
 int chan, program;
 {
-/*
-  sprintf(textbuff, "%%%%MIDI program %d %d",
-         chan+1, program);
-*/
+  if (chan == 9) return;  /* [SS] 2020-02-17 */
   sprintf(textbuff, "%%%%MIDI program %d", program);
   addtext_type0(textbuff,0,chan);
 /* abc2midi does not use the same channel number as specified in 
@@ -833,7 +829,7 @@ char *mess;
     } 
     else {
       if (leng < BUFFSIZE - 3) {
-        sprintf(buffer2, " %s", textbuff); 
+        snprintf(buffer2, sizeof(buffer2), " %s", textbuff); /*[SDG] 2020-06-03*/
         addtext(buffer2,type); /* [SS] 2019-07-12 */
       };
     };
@@ -1086,7 +1082,7 @@ int prtime(int units)
 
 char * pitch2key(int note)
 {
-static char name[5];
+static char name[16]; /* [SDG] 2020-06-03 */
 char* s = name;
   switch(note % 12)
   {
@@ -1173,7 +1169,7 @@ for (i=0;i<128;i++) {
 
 /* [SS] 2018-04-24 */
 void output_progs_data () {
-int i,nprogs;
+int i;
 /* check that there is valid progactivity */
 
   printf("progs ");
@@ -1188,8 +1184,7 @@ int i,nprogs;
 
 void stats_finish()
 {
-int i,sum;
-int p;
+int i; /* [SDG] 2020-06-03 */
 int npulses;
 int nprogs;
 
@@ -1304,7 +1299,6 @@ if (sum != 0) {
 
 void output_track_summary () {
 int i;
-int p,n;
 /* find first channel containing data */
 for (i=0;i<17;i++) {
    if(trkdata.notecount[i] == 0 && trkdata.chordcount[i] == 0) continue; 
@@ -1434,8 +1428,8 @@ int chan, lsb, msb;
   /* [SS] 2014-01-05  2015-08-04*/
   pitchbend = (msb*128 + lsb);
   bend =  (float) (pitchbend - 8192);
-  bend = bend/4096.0f;
-  printf("Pitchbend %2d %d  bend = %6.4f\n",chan+1,pitchbend,bend);
+  bend = bend/40.96;
+  printf("Pitchbend %2d %d  bend = %6.3f (cents)\n",chan+1,pitchbend,bend);
 }
 
 void stats_pitchbend(chan,lsb,msb)
@@ -1643,7 +1637,7 @@ void stats_metatext(type,leng,mess)
 int type, leng;
 char *mess;
 {
-int i,b;
+int i; 
 if (type != 3) return;
 printf("metatext %d ",type);
 for (i=0;i<leng;i++) printf("%c",mess[i]);
@@ -2895,7 +2889,7 @@ int activesplit,nsplits;
 int done;
 struct listx* i;
 int k;
-int firstposnum;
+int firstposnum = 0; /* [SDG] 2020-06-03 */
 /* initializations */
 activesplit = 0;
 nsplits = 0;

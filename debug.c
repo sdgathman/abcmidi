@@ -143,7 +143,7 @@ void showfeature(struct feature *ft)
     case DYNAMIC:  printf("DYNAMIC\n");
       break;
     case LINENUM:  
-      printf("LINENUM %d\n", (int)(ft->item));
+      printf("LINENUM %p\n", (void *)(ft->item)); /* [SDG] 2020-06-03 */
       break;
     case MUSICLINE:  printf("MUSICLINE\n");
       break;
@@ -187,12 +187,10 @@ struct voice* v;
   struct chord* thischord;
   int chordcount;
   int printedline;
-  int ingrace;
 
   if (v->place == NULL) {
     return(0);
   };
-  ingrace = 0;
   chordcount = 0;
   v->beamed_tuple_pending = 0;
   thischord = NULL;
@@ -226,7 +224,7 @@ void showtune(struct tune* t)
     atitle = nextitem(&t->title);
   };
   if (t->composer != NULL) {
-    printf("COMPOSER: %s\n", atitle);
+    printf("COMPOSER: %s\n", t->composer); /* [SDG] 2020-06-03 */
   };
   if (t->origin != NULL) {
     printf("ORIGIN: %s\n", t->origin);

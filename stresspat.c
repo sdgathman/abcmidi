@@ -40,7 +40,7 @@ void reduce (int *, int *);
 void
 init_stresspat ()
 {
-  if ( stresspat[0].name == "Hornpipe") {
+  if ( stresspat[0].name != NULL) {  /* [SDG] 2020-06-03 */
       printf("stresspat already initialized\n");
       return;
       } 
@@ -515,10 +515,10 @@ read_custom_stress_file (char *filename)
   {
     if (feof (inhandle))
       break;
-    j = fscanf (inhandle, "%s", &name);
+    j = fscanf (inhandle, "%31s", name); /* [SDG] 2020-06-03 */
     if (j == -1)
       break;
-    j = fscanf (inhandle, "%s", &meter);
+    j = fscanf (inhandle, "%5s", meter); /* [SDG] 2020-06-03 */
     index = stress_locator (&name[0], &meter[0]);
     if (verbose > 1) printf ("%s %s index = %d\n",name,meter,index);
     
@@ -561,6 +561,6 @@ read_custom_stress_file (char *filename)
       stresspat[index].vel[i] = gain;      /* [RZ] 2013-12-25 */
       stresspat[index].expcoef[i] = expand; /* [RZ] 2013-12-25 */
     }
-    fgets (str, 3, inhandle);
+    if (fgets (str, 3, inhandle) == NULL) break; /* [SDG] 2020-06-03 */
   }
 }

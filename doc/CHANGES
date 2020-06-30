@@ -13658,7 +13658,92 @@ such as clef=tenor. It was therefore necessary to reset
 *octave = 0. For all these situations and similar.
 
 
+June 02 2020
+
+Peter Sutton (petersutton2009@gmail.com) who packages abcmidi
+for Arch Linux reported a linkage error
+/usr/bin/ld: toabc.o:(.bss+0xd7c): multiple definition of ingrace'; parseabc.o:(.bss+0x788): first defined here /usr/bin/ld: drawtune.o:(.bss+0x168): multiple definition ofingrace'; parseabc.o:(.bss+0x788): first defined here
+
+My suspicion is that the changeover to gcc ver. 10 (2020-05-08)
+is causing these problems
+
+Fix: in parseabc.c changed
+int ingrace = 0;
+to
+static int ingrace = 0; /* [SS] 2020-06-02 */
 
 
- 
+June 03 2020
+
+gcc-10: Stuart D Gathman (stuart@gathman.org) detected numerous
+potential problems in the C code. eg variables used for they are
+initialized, variables declared and not used, missing defaults
+in switch statements, indenting in if statements not matching
+blocks, possible missing nulls in strings, ...
+Suggested changes were inserted without changing the logic
+of the code. Changes were marked with [SDG] 2020-06-03 in case
+bugs are discovered later.
+
+
+June 20 2020
+
+In order to improve the handling of the SymbTr Turkish Makam
+database https://compmusic.upf.edu/node/287 which was converted
+to abc format in https://ifdo.ca/~seymour/runabc/makams/index.html ,
+the abc representation of the note pitches has been changed.
+The collection of abc notated files will be replaced shortly
+and will work with both abc2svg and abcm2ps thanks to the
+help of Jef Moine and Hudson Lacerda. Hudson has contributed
+patches to the abcmidi package which have been incorporated into
+parseabc.c and store.c.
+
+June 22 2020
+
+A minor change was made to midi2abc so that the pitchbend values
+are presented in units of cents.
+
+June 23 2020
+
+parseabc: renamed readlen_nocheck() to read_microtone_value().
+If the microtone value is an integer instead of a fraction,
+(i.e. no / is present), then b (the denominator) is set to 0
+to signal that it is an integer.  An integer microtone such
+as ^n or _n, implies that its pitch shift is given by n
+octave divisions where the number of divisions ndiv is specified
+in the command.
+
+%%MIDI temperamentequal <ndiv> [octave_cents] [fifth_steps] [sharp_steps]
+
+For a detailed description of the temperamentequal command,
+see the May 19 2015 insert in this document.  The nonfraction
+microtones will be used to represent the accidentals for the pitches
+in the Turkish Makam database mentioned previously. 
+
+June 25 2020
+
+parseabc: parsekey now accepts integer microtones when %%MIDI temperamentequal 
+is set. The temperament flag is declared in parseabc.c and linked to
+store.c with an extern statement, so that the parser knows whether %%MIDI temperamentequal statement
+was included in the abc file.
+
+June 27 2020
+
+abc2midi: in pitchof_b() in store.c (which implements various 
+temperaments), the Hudson Lacerda modified the pitchbends so
+that the key of A is still 440.0.
+   /* [HL] 2020-06-27 Adjust for A=440.0 with zero pitchbend */
+    pitch4096 += (9*SEMISIZE) - (3*fifth_size-octave_size);
+
+
+June 28 2020
+
+abc2midi: the -TT tuning option tunes by half the requested amount. Analysis:
+the pitchbend covers a range of +/- 2 semitones not +/- 1 semitone. The
+calculation of the pitchshift should be
+bend = (int) (4096.0 * semitone_shift) + 8192; 
+rather than
+bend = (int) (8192.0 * semitone_shift) + 8192; 
+This will allow tuning to some flutes which are down by a whole
+tone (A = 392Hz).
+
 

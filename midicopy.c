@@ -52,7 +52,7 @@
 
 
 
-#define VERSION "1.35 January 05 2020 midicopy"
+#define VERSION "1.36 June 04 2020 midicopy"
 #include "midicopy.h"
 #define NULLFUNC 0
 #define NULL 0
@@ -610,7 +610,6 @@ readtrack ()
   int needed;
   long varinum;
   int i;                        /* [SS] 2017-10-19 */
-  int chan;
   double delta_seconds;
 
   for (i=0;i<17;i++) haschannel[i] = 0;
@@ -1401,7 +1400,6 @@ mf_write_track_chunk (which_track, fp)
   long trkhdr, trklength;
   void write16bit (), write32bit ();
   void WriteVarLen ();
-  int ier;
 
 
   trkhdr = MTrk;
@@ -1678,7 +1676,7 @@ eputc (char c)
 int
 seconds_to_tick (float seconds)
 {
-  int i, ind;
+  int i, ind=0; /* [SDG] 2020-06-02 */
   float tick, fraction;
   for (i = 0; i < temposize; i++)
     {

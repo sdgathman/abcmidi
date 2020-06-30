@@ -730,7 +730,7 @@ FILE *fp;
 {
   long trkhdr,trklength;
   long offset, place_marker;
-  long endspace;
+  long endspace = 0; /* [SDG] 2020-06-02 */
 
 /* There is an alternate version of this code selected by NOFTELL
    which doesn't require use of file seek */

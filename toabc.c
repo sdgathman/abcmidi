@@ -21,7 +21,7 @@
 
 /* back-end for outputting (possibly modified) abc */
 
-#define VERSION "2.07 May 06 2020 abc2abc"
+#define VERSION "2.08 June 04 2020 abc2abc"
 
 /* for Microsoft Visual C++ 6.0 or higher */
 #ifdef _MSC_VER
@@ -416,6 +416,8 @@ enum abctype t;
   return(p);
 }
 
+/* nextnotes() function is not used [SDG] 2020-06-03 */
+#if 0
 static int nextnotes()
 /* return the number of notes in the next bar */
 /* part of new linebreak option (-n) */
@@ -436,6 +438,7 @@ static int nextnotes()
   };
   return(n);
 }
+#endif
 
 static void reduce(a, b)
 int *a, *b;
@@ -2221,7 +2224,7 @@ int *octave, *mult;
     *octave = xoctave;
     } else {
     int val, newval;
-    int acc;
+    int acc =0;  /* [SDG] 2020-06-03 */
     char *anoctave = "cdefgab";
 
     *octave = xoctave;
@@ -2290,7 +2293,7 @@ int xoctave, n, m;
     octave = xoctave;
   } else {
     int val, newval;
-    int acc;
+    int acc = 0; /* [SDG] 2020-06-03 */
     char *anoctave = "cdefgab";
 
     octave = xoctave;
@@ -2628,7 +2631,7 @@ void printpitch(int pitch)
 /* convert midi pitch value to abc note */
 {
 int p;
-char keylet,symlet;
+char keylet,symlet = '='; /* [SDG] 2020-06-03 */
 int keynum,symcod;
 char string[16];
 p = pitch%12;

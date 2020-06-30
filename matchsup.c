@@ -1100,6 +1100,8 @@ static void brokenadjust()
       num1 = 15;
       num2 = 1;
       break;
+    default:
+      num1=num2=1; /* [SDG] 2020-06-03 */
   };
   denom12 = (num1 + num2)/2;
   if (v->brokentype == LT) {
@@ -1650,7 +1652,7 @@ static void tiefix()
 {
   int j;
   int inchord;
-  int chord_num, chord_denom;
+  int chord_num=-1, chord_denom=1; /*[SDG] 2020-06-03 */
   int chord_start,chord_end;
   int voiceno;
 
@@ -2012,7 +2014,8 @@ for (i=from;i<=to;i++)
   {
   j = feature[i];
   if (j<0 || j>73) printf("illegal feature[%d] = %d\n",i,j); /* [SS] 2012-11-25 */
-  else printf("%d %s   %d %d %d %d \n",i,featname[j],pitch[i],num[i],denom[i]);
+  else printf("%d %s   %d %d %d \n",i,featname[j],pitch[i],num[i],denom[i]);
+  /* [SDG] 2020-06-03 removed extra %d */
   }
 }
 

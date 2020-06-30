@@ -1,11 +1,11 @@
 abcMIDI :   abc <-> MIDI conversion utilities
 
-midi2abc version 3.43 January 06 2020
-abc2midi version 4.32 May 06 2020
-abc2abc  version 2.07 May 06 2020
-yaps     version 1.76 April 30 2020
-abcmatch version 1.73 June 06 2019
-midicopy version 1.35 January 05 2019
+midi2abc version 3.46 June 22 2020
+abc2midi version 4.36 June 28 2020
+abc2abc  version 2.08 June 04 2020
+yaps     version 1.77 June 04 2020
+abcmatch version 1.73 June 04 2020
+midicopy version 1.36 June 04 2019
 
 24th January 2002
 
@@ -35,7 +35,7 @@ snprintf see the note in doc/CHANGES dated January 08 2005 (and also
 December 17 2004).
 
 These programs make use of the 'midifilelib' public domain MIDI file utilities,
-available from
+which was originally available from
 
 http://www.harmony-central.com/MIDI/midifilelib.tar.gz
 

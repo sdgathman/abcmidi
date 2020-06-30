@@ -85,7 +85,7 @@ int parsing, slur;
 int ignore_line = 0; /* [SS] 2017-04-12 */
 int inhead, inbody;
 int parserinchord;
-int ingrace = 0;
+static int ingrace = 0; /* [SS] 2020-06-01 */
 int chorddecorators[DECSIZE];
 char decorations[] = ".MLRH~Tuv'OPS"; /* 2020-05-01 */
 char *abbreviation[SIZE_ABBREVIATIONS];
@@ -114,7 +114,7 @@ int intune = 1;
 int inchordflag;		/* [SS] 2012-03-30 */
 struct fraction setmicrotone;	/* [SS] 2014-01-07 */
 int microtone;			/* [SS] 2014-01-19 */
-
+int temperament = 0;            /* [SS] 2020-06-25 */
 
 extern programname fileprogram;
 int oldchordconvention = 0;
@@ -162,13 +162,14 @@ addstring (s)
   return (p);
 }
 
-/* [SS] 2014-08-16 */
+/* [SS] 2014-08-16 [SDG] 2020-06-03 */
 char * concatenatestring(s1,s2)
    char * s1;
    char * s2;
-{  char *p;
-  p = (char *) checkmalloc (strlen(s1) + strlen(s2) + 1);
-  snprintf(p,sizeof p, "%s%s",s1,s2);
+{ 
+   int len = strlen(s1) + strlen(s2) + 1;
+   char *p = (char *) checkmalloc(len);
+   snprintf(p,len, "%s%s",s1,s2);
   return p;
 }
 
@@ -340,12 +341,14 @@ isnumberp (p)
   c = p;
   while (( **c != ' ') && ( **c != TAB) &&  **c != '\0')
     {
-      if (( *c >= 0) &&  (*c <= 9))
+      if (( **c >= 0) &&  (**c <= 9)) /*[SDG] 2020-06-03 */
 	*c = *c + 1;
       else
 	return 0;
     }
   return 1;
+/* could use isdigit(**c) */
+/* is zero a positive number? is V:0 ok? [SS] */
 }
 
 
@@ -533,7 +536,7 @@ readlen (a, b, p)
 }
 
 void
-readlen_nocheck (a, b, p)
+read_microtone_value (a, b, p)
      int *a, *b;
      char **p;
 /* read length part of a note and advance character pointer */
@@ -559,7 +562,10 @@ readlen_nocheck (a, b, p)
 	      *p = *p + 1;
 	    };
 	};
-    };
+    } else {
+	*b = 0; /* [SS] 2020-06-23 */
+	/* To signal that the microtone value is not a fraction */
+    }	;
   t = *b;
   while (t > 1)
     {
@@ -581,9 +587,13 @@ ismicrotone (p, dir)
      int dir;
 {
   int a, b;
-  readlen_nocheck (&a, &b, p);
-  if (b != 1)
+  char *chp; /* [HL] 2020-06-20 */
+  chp = *p;
+  read_microtone_value (&a, &b, p);
+  /* readlen_nocheck advances past microtone indication if present */
+  if (chp != *p) /* [HL] 2020-06-20 */
     {
+      /* printf("event_microtone a = %d b = %d\n",a,b); */
       event_microtone (dir, a, b);
       return 1;
     }
@@ -1128,11 +1138,34 @@ parsekey (str)
 /* parse contents of K: field */
 /* this works by picking up a strings and trying to parse them */
 /* returns 1 if valid key signature found, 0 otherwise */
+/* This is unfortunately a complicated function because it does alot.
+ * It prepares the data:
+ * sf = number of sharps or flats in key signature
+ * modeindex:= major 0, minor 1, ... dorian, etc.
+ * modmap: eg "^= _^   " corresponds to A# B Cb D#    
+ * modmul: 2 signals double sharp or flat
+ * modmicrotone: eg {2/4 0/0 0/0 2/0 0/0 -3/0 0/0} for ^2/4A ^2D _3F
+ * clefstr: treble, bass, treble+8, ... 
+ * octave: eg. 1,2,-1 ... 
+ * transpose: 1,2 for handling certain clefs 
+ * and various flags like explict, gotoctave, gottranspose, gotclef, gotkey
+ * which are all sent to abc2midi (via store.c), yaps (via yapstree), abc2abc
+ * via (toabc.c), using the function call event_key().
+ *
+ * The variables sf, modeindex, modmul, and modmicrotone control which notes
+ * are sharpened or flatten in a musical measure.
+ * The variable clefstr selects one of the clefs, (treble, bass, ...)
+ * The variable octave allows you to shift everything up and down by an octave
+ * The variable transpose allows you to automatically transpose every note.
+ *
+ * All of this information is extracted from the string str from the
+ * K: command.
+ */
      char *str;
 {
   char *s;
   char word[30];
-  int parsed;
+  int parsed = 0;  /* [SDG] 2020-06-03 */
   int gotclef, gotkey, gotoctave, gottranspose;
   int explict;			/* [SS] 2010-05-08 */
   int modnotes;			/* [SS] 2010-07-29 */
@@ -1176,6 +1209,7 @@ parsekey (str)
       modmicrotone[i].num = 0;	/* [SS] 2014-01-06 */
       modmicrotone[i].denom = 0;
     };
+  word[0] = 0; /* in case of empty string [SDG] 2020-06-04 */
   while (*s != '\0')
     {
       parsed = parseclef (&s, word, &gotclef, clefstr, &cgotoctave, &coctave);
@@ -1210,6 +1244,11 @@ parsekey (str)
 	  parsed = 1;
 	}
 
+/* if K: not 'none', 'Hp' or 'exp' then look for key signature
+ * like Cmaj Amin Ddor ...                                   
+ * The key signature is expressed by sf which indicates the
+ * number of sharps (if positive) or flats (if negative)       */
+ 
       if ((parsed == 0) && ((word[0] >= 'A') && (word[0] <= 'G')))
 	{
 	  gotkey = 1;
@@ -1289,6 +1328,13 @@ parsekey (str)
 	      sf = sf + 12;
 	    };
 	};
+
+
+      /* look for key signature modifiers
+       * For example K:D _B
+       * which will include a Bb in the D major key signature
+       *                                                      */
+
       if ((word[0] == '^') || (word[0] == '_') || (word[0] == '='))
 	{
 	  modnotes = 1;
@@ -1334,25 +1380,43 @@ parsekey (str)
 	      parsed = 1;
 	    };
 	  /* microtone? */
-	  success = sscanf (&word[1], "/%d%c", &b, &c);
-	  if (success == 2) /* [SS] 2016-04-10 */
-	    a = 1;
-	  else
-	    success = sscanf (&word[1], "%d/%d%c", &a, &b, &c);
+	  /* shortcuts such as ^/4G instead of ^1/4G not allowed here */
+	  parsed =0;
+	  success = sscanf (&word[1], "%d/%d%c", &a, &b, &c);
 	  if (success == 3) /* [SS] 2016-04-10 */
 	    {
 	      parsed = 1;
 	      j = (int) c - 'A';
               if (j > 7) j = (int) c - 'a';
               if (j > 7 || j < 0) {printf("invalid j = %d\n",j); exit(-1);}
-	      if (word[0] == '_')
-		a = -a;
-	      /*printf("a/b = %d/%d for %c\n",a,b,c);*/ 
-	      modmap[j] = word[0];
-	      modmicrotone[j].num = a;
-	      modmicrotone[j].denom = b;
+	      if (word[0] == '_') a = -a;
+	      /* printf("%s fraction microtone  %d/%d for %c\n",word,a,b,c); */
+	      if (temperament == 1) {  /* [SS] 2020-06-25 */
+		    event_warning("do not use fractional microtone if %%MIDI temperamentequal was set");
+	            }
+	   } else {
+	    success = sscanf (&word[1], "%d%c", &a, &c); /* [SS] 2020-06-25 */
+            if (success == 2)
+	    {
+            b = 0;
+            /* printf("%s integer microtone %d%c\n",word,a,c); */
+	    if (temperament == 0) { /* [SS] 2020-06-25 */
+		    event_warning("do not use integer microtone without calling %%MIDI temperamentequal");
+	            }
+	    parsed = 1;
 	    }
-	}
+          }
+	  if (parsed ==1) {
+            j = (int) c - 'A';
+            if (j > 7) j = (int) c - 'a';
+            if (j > 7 || j < 0) {printf("invalid j = %d\n",j); exit(-1);}
+            if (word[0] == '_') a = -a;
+	    modmap[j] = word[0];
+	    modmicrotone[j].num = a;
+	    modmicrotone[j].denom = b;
+	    /* printf("%c microtone = %d/%d\n",modmap[j],modmicrotone[j].num,modmicrotone[j].denom); */
+	  }
+	} /* finished ^ = _ */
     }
   if ((parsed == 0) && (strlen (word) > 0))
     {
@@ -2096,8 +2160,11 @@ parsefield (key, field)
       {
 	int num, denom;
 
-	strncpy (timesigstring, place, 16);	/* [SS] 2011-08-19 */
+	/* strncpy (timesigstring, place, 16);   [SS] 2011-08-19 */
+	snprintf(timesigstring,sizeof(timesigstring),"%s",place); /* [SEG] 2020-06-07 */
 	if (strncmp (place, "none", 4) == 0)
+        /* converts 'M: none'  to 'M: 4/4' otherwise a warning 
+	 * is returned if not a fraction [SS] */
 	  {
 	    event_timesig (4, 4, 0);
 	  }
@@ -2478,9 +2545,10 @@ parsemusic (field)
 		case '|':
 		  p = p + 1;
 		  event_bar (THICK_THIN, "");
-		  if (*p == ':')   /* [SS] 2015-04-13 */
+		  if (*p == ':') {  /* [SS] 2015-04-13 [SDG] 2020-06-04 */
 		      event_bar (BAR_REP, "");
 		      p = p + 1;
+		      }
 		  break;
 		default:
 		  if (isdigit (*p))
@@ -2748,7 +2816,7 @@ parsemusic (field)
                  }
               else
 	        event_split_voice ();
-	        break;
+	      break;
 
 
 	    default:
@@ -2916,7 +2984,7 @@ parsefile (name)
   FILE *fp_last,*fp_include; /* [SS] 2017-12-10 */
   int reading;
   int fileline;
-  int last_position;
+  int last_position = 0; /* [SDG] 2020-06-03 */
   struct vstring line;
   /* char line[MAXLINE]; */
   int t;
