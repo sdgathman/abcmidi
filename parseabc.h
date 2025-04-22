@@ -141,6 +141,7 @@ extern void event_acciaccatura();
 extern void event_start_extended_overlay();
 extern void event_stop_extended_overlay();
 extern void event_split_voice();
+extern void event_temperament();
 extern void print_voicecodes(void);
 extern void init_abbreviations();
 extern void free_abbreviations();

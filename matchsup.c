@@ -1407,6 +1407,10 @@ void event_microtone(int dir, int a, int b)
 {
 }
 
+void event_temperament(char **line) {
+}
+
+
 void event_normal_tone()
 {
 }

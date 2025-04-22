@@ -13735,15 +13735,14 @@ that the key of A is still 440.0.
     pitch4096 += (9*SEMISIZE) - (3*fifth_size-octave_size);
 
 
-June 28 2020
+July 03 2020
+abcmidi: %%temperament command has been implemented by Hudson
+Lacerda (in store.c)
+July 05 2020
+parseabc.c updated to reflect that the temperament integer flag
+can take various values.
 
-abc2midi: the -TT tuning option tunes by half the requested amount. Analysis:
-the pitchbend covers a range of +/- 2 semitones not +/- 1 semitone. The
-calculation of the pitchshift should be
-bend = (int) (4096.0 * semitone_shift) + 8192; 
-rather than
-bend = (int) (8192.0 * semitone_shift) + 8192; 
-This will allow tuning to some flutes which are down by a whole
-tone (A = 392Hz).
+You can find a test file detune.abc in the samples folder.
+
 
 

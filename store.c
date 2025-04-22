@@ -142,6 +142,7 @@ void doornament()
 void hornp()
 void event_note()
 void event_microtone()
+void event_temperament()
 void event_normal_tone()
 void event_handle_gchord()
 void event_handle_instruction()
@@ -184,7 +185,7 @@ int main()
 
  */
 
-#define VERSION "4.36 June 28 2020 abc2midi" 
+#define VERSION "4.38 July 05 2020 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -269,7 +270,13 @@ int active_pitchbend;
 extern struct fraction setmicrotone; /* [SS] 2014-01-07 */
 extern int microtone;
 extern int temperament;  /* [SS] 2020-06-25 */
+/* [HL] 2020-07-03 */
+float temperament_dt[12]={0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0};
 #define SEMISIZE 4096
+#define TEMPERDT -1
+#define TEMPEREQ 1
+#define TEMPERLN 2
+#define TEMPERNORMAL 0
 int octave_size = 12*SEMISIZE;
 int fifth_size = 7*SEMISIZE; /* default to 12-edo */
 int sharp_size = SEMISIZE; /* [HL] 2015-05-15] */
@@ -369,6 +376,7 @@ int notesdefined = 1;
 struct trackstruct trackdescriptor[40]; /* trackstruct defined in genmidi.h*/
  
 
+int detune_list[12]; /* [SS] 2020-06-30 */
 int dependent_voice[64]; /* flag to indicate type of voice */
 int voicecount;
 int numsplits=0;
@@ -974,7 +982,7 @@ char **filename;
     if (argc > arg) {
        n = sscanf(argv[arg],"%f",&afreq);
        }
-    if (n < 1) {printf("expecting float between 392.0 and 466.16 after -TT\n");
+    if (n < 1) {printf("expecting float between 415.30 and 466.16 after -TT\n");
                } else {
                retuning = 1;
                semitone_shift = (float) (12.0 * log10(afreq/440.0f)/log10(2.0f)); /* [SS] 2015-10-08 extra parentheses */
@@ -982,11 +990,10 @@ char **filename;
                if (semitone_shift >= 1.001) {printf("frequency %f must be less than 466.16\n",afreq);
                    retuning = 0;
                   }
-               if (semitone_shift <= -2.0) {printf("frequency %f must be greater than 392.0\n",afreq);
+               if (semitone_shift <= -1.015) {printf("frequency %f must be greater than 415.0\n",afreq);
                   retuning = 0;
                   }             
-/* [SS] 2020-06-28 */
-               if (retuning) {bend = (int) (4096.0 * semitone_shift) + 8192;
+               if (retuning) {bend = (int) (8192.0 * semitone_shift) + 8192;
                               if (bend > 16383) bend=16383;
                               if (bend < 0) bend = 0;
                               printf("bend = %d\n",bend);
@@ -2141,7 +2148,7 @@ char *s;
   else if (strcmp(command, "temperamentlinear") == 0) {
       double octave_cents=0.0;
       double fifth_cents=0.0;
-      temperament = 1;
+      temperament = TEMPERLN;
       middle_c = 60*SEMISIZE;
 
       if (sscanf(p," %lf %lf ",&octave_cents,&fifth_cents) == 2) {
@@ -2253,13 +2260,13 @@ char *s;
 			 );
       
 
-      temperament = 1;
+      temperament = TEMPEREQ;
       middle_c = 60*SEMISIZE;
       done = 1;
     }
 
   else if (strcmp(command, "temperamentnormal") == 0) {
-      temperament = 0;
+      temperament = TEMPERNORMAL;
       event_normal_tone();
       done = 1;
       middle_c = 60;
@@ -3720,7 +3727,9 @@ int *pitchbend;
 
 
   p = (int) ((long) strchr(anoctave, note) - (long) anoctave);
-  if (temperament) {
+  /* [HL] 2020-07-03 */
+  if ((temperament==TEMPERLN) || (temperament==TEMPEREQ))  {
+ 
     p = tscale[p];
     if (acc == '^') p = p + mul*accidental_size;
     if (acc == '_') p = p - mul*accidental_size;
@@ -3729,7 +3738,6 @@ int *pitchbend;
     
     /* [HL] 2020-06-27 Adjust for A=440.0 with zero pitchbend */
     pitch4096 += (9*SEMISIZE) - (3*fifth_size-octave_size);
-
 
     /* [HL] 2015-05-15 */
     if (microtone) {
@@ -3755,13 +3763,17 @@ int *pitchbend;
     pitch =  (SEMISIZE*128+pitch4096+SEMISIZE/2)/SEMISIZE-128;
     bend =  8192+4096*(pitch4096 - pitch*SEMISIZE)/SEMISIZE;
     bend = bend<0?0:(bend>16383?16383:bend);
-   } else {
+   } else { /* TEMPERNORMAL / TEMPERDT */
     p = scale[p];
     if (acc == '^' && !microtone) p = p + mul; /* [SS] 2014-01-20 */
     if (acc == '_' && !microtone) p = p - mul;
     pitch = p + 12*octave + middle_c;
     bend = 8192; /* corresponds to zero bend */
+    if (temperament == TEMPERDT) {  /* [HL] 2020-07-03 */
+	bend += (int) (SEMISIZE * temperament_dt[p] / 100.0);
+	bend = bend<0?0:(bend>16383?16383:bend);
     }
+   }
 if (!microtone) *pitchbend = bend; /* don't override microtone */
 /* if (comma53) [SDG] 2020-06-03 ambiguous statement
  * should the following lines be included in if statement? */
@@ -4350,6 +4362,31 @@ int xoctave, n, m;
       /*printf(": notes = %d v->thisend = %d\n",notes,v->thisend); [SS] 2019-10-13*/
 }
 
+/* [SS] 2020-06-30 */
+void event_temperament(char* line)
+{
+char *p = line+13;
+int i;
+float dt[12];
+i = sscanf(p,"%f %f %f %f %f %f %f %f %f %f %f %f",&dt[0],&dt[1],&dt[2],
+&dt[3],&dt[4],&dt[5],&dt[6],&dt[7],&dt[8],&dt[9],&dt[10],&dt[11]);
+
+/* [HL] 2020-07-03 */
+if (i!=12) {
+	event_error("%%temperament expects 12 numbers");
+	return;
+}
+for (i=0;i<12;i++) {
+	if (fabs(dt[i]) > 200.0) {
+		event_error("%%temperament detune cannot be greater than +- 200 cents");
+		return;
+	}
+}
+for (i=0;i<12;i++) {
+	temperament_dt[i] = dt[i];
+}
+temperament = TEMPERDT;
+}
 
 void event_microtone(int dir, int a, int b)
 {
@@ -5668,7 +5705,7 @@ static void startfile()
   wcount = 0;
   parts = -1;
   middle_c = default_middle_c;
-  temperament=0;
+  temperament=TEMPERNORMAL; /* [HL] 2020-07-03 */
   for (j=0; j<26; j++) {
     part_start[j] = -1;
   };

@@ -1391,16 +1391,13 @@ parsekey (str)
               if (j > 7 || j < 0) {printf("invalid j = %d\n",j); exit(-1);}
 	      if (word[0] == '_') a = -a;
 	      /* printf("%s fraction microtone  %d/%d for %c\n",word,a,b,c); */
-	      if (temperament == 1) {  /* [SS] 2020-06-25 */
-		    event_warning("do not use fractional microtone if %%MIDI temperamentequal was set");
-	            }
 	   } else {
 	    success = sscanf (&word[1], "%d%c", &a, &c); /* [SS] 2020-06-25 */
             if (success == 2)
 	    {
             b = 0;
             /* printf("%s integer microtone %d%c\n",word,a,c); */
-	    if (temperament == 0) { /* [SS] 2020-06-25 */
+	    if (temperament != 1) { /* [SS] 2020-06-25 2020-07-05 */
 		    event_warning("do not use integer microtone without calling %%MIDI temperamentequal");
 	            }
 	    parsed = 1;
@@ -2859,6 +2856,9 @@ parseline (line)
           }
   if (strcmp(line,"%%endtext") == 0) {
 	  ignore_line = 0;
+          }
+  if ((strncmp(line,"%%temperament",12) == 0) && fileprogram == ABC2MIDI) {
+	  event_temperament(line);
           }
 
   handle_abc2midi_parser (line);  /* [SS] 2020-03-25 */
