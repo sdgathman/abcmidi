@@ -22,7 +22,7 @@
 /* yapstree.c - back-end for abc parser. */
 /* generates a data structure suitable for typeset music */
 
-#define VERSION "1.77 June 04 2020 yaps"
+#define VERSION "1.90 June 14 2022 yaps"
 #include <stdio.h>
 #ifdef USE_INDEX
 #define strchr index
@@ -53,18 +53,20 @@ extern void setup_fonts();
 extern void printtune(struct tune *t);
 extern void set_keysig(struct key *k, struct key *newval);
 
+/* forward definition */
+void event_clef(char* clefstr, cleftype_t * new_clef);
+
 programname fileprogram = YAPS;
 extern int oldchordconvention; /* for handling +..+ chords */
 
 struct voice* cv;
 struct tune thetune;
 
-char outputname[256];
-char outputroot[256];
+char outputname[MAX_OUTPUTNAME + 1]; /* [JA] 2020-11-01 */
+char outputroot[MAX_OUTPUTROOT + 1];
 char matchstring[256];
 int fileopen;
 
-int repcheck;
 int xinhead;
 int xinbody;
 int suppress;
@@ -125,6 +127,16 @@ static struct fract* newfract(int a, int b)
   f->num = a;
   f->denom = b;
   return(f);
+}
+
+static timesig_details_t *newtimesig(void)
+/* create an initialized time signature */
+{
+  timesig_details_t *new_timesig;
+
+  new_timesig = (timesig_details_t *)checkmalloc (sizeof (timesig_details_t));
+  init_timesig(new_timesig);
+  return new_timesig;
 }
 
 static struct slurtie* newslurtie()
@@ -203,15 +215,14 @@ static struct chord* newchord()
   return(f);
 }
 
-struct aclef* newclef(enum cleftype t, int octave)
+cleftype_t *newclef (cleftype_t * source_clef)
 /* create and initialize clef data structure */
 {
-  struct aclef* f;
+  cleftype_t *f; /* [JA] 2020-10-19 */
 
-  f = (struct aclef*)checkmalloc(sizeof(struct aclef));
-  f->type = t;
-  f->octave = octave;
-  return(f);
+  f = (cleftype_t *) checkmalloc (sizeof (cleftype_t));
+  copy_clef (f, source_clef);
+  return (f);
 }
 
 struct key* newkey(char* name, int sharps, char accidental[], int mult[])
@@ -324,7 +335,7 @@ static void closebeam(struct voice* v)
   };
   if (v->beamroot == v->beamend) {
     ft = v->beamroot;
-    n = ft->item;
+    n = ft->item.voidptr;
     n->beaming = single;
     v->beamroot = NULL;
     return;
@@ -340,7 +351,7 @@ static void closebeam(struct voice* v)
     switch (ft->type) {
     case NOTE:
       if (ingrace == 0) {
-        n = ft->item;
+        n = ft->item.voidptr;
         n->stemup = stemup;
       };
       break;
@@ -356,7 +367,7 @@ static void closebeam(struct voice* v)
     ft = ft->next;
   };
   if (ft == v->beamend) {
-    n = ft->item;
+    n = ft->item.voidptr;
     n->stemup = stemup;
     n->beaming = endbeam;
   } else {
@@ -376,7 +387,7 @@ static void closegracebeam(struct voice* v)
   if (ft == NULL) {
     event_error("Missing grace notes");
   } else {
-    n = ft->item;
+    n = ft->item.voidptr;
     if (v->gracebeamroot == v->gracebeamend) {
       n->beaming = single;
     } else {
@@ -394,13 +405,13 @@ static void insertnote(struct feature* chordplace, struct feature* newfeature)
   struct feature* previous;
   int foundplace;
 
-  newnote = newfeature->item;
+  newnote = newfeature->item.voidptr;
   previous = chordplace;
   f = chordplace->next;
   foundplace = 0;
   n = NULL;
   while ((f != NULL)&&(f->type==NOTE)&&(foundplace == 0)) {
-    n = f->item;
+    n = f->item.voidptr;
     if (newnote->y > n->y) {
       foundplace = 1;
     } else {
@@ -436,7 +447,7 @@ static void beamitem(featuretype mytype, void* newitem, struct feature* x)
 
   /* deal with beaming here */
   if (cv->ingrace) {
-    if (mytype == NOTE) {
+    if ((mytype == NOTE) && (newitem != NULL)) {
       n = newitem;
       n->stemup = 1;
       if (cv->gracebeamroot == NULL) {
@@ -505,6 +516,50 @@ static void beamitem(featuretype mytype, void* newitem, struct feature* x)
   };
 }
 
+/* initialize a feature struct with empty values */
+static void init_feature (struct feature *x, featuretype mytype)
+{
+  x->next = NULL;
+  x->type = mytype; 
+  x->item.voidptr = NULL;
+  x->xleft = 0;
+  x->xright = 0;
+  x->yup = 0;
+  x->ydown = 0;
+}
+
+static struct feature *addnumberfeature (featuretype mytype, int number)
+/* handles numeric feature types
+ * may mark the end of a beamed section, so still need to call
+ * beamitem() on these
+ */
+{
+  struct feature *x;
+
+  if (cv == NULL) {
+    printf ("ERROR: no current voice in addfeature(status,type=%d\n", mytype);
+    //printf("status->inhead = %d status->inbody = %d\n", status->inhead, status->inbody);
+    exit (0);
+  }
+  x = (struct feature *)checkmalloc (sizeof (struct feature));
+  init_feature (x, mytype);
+  x->item.number = number;
+  if (cv->first == NULL) {
+    cv->first = x;
+    cv->last = x;
+    beamitem (mytype, NULL, x);
+  } else {
+    if ((cv->last == NULL) || (cv->last->next != NULL)) {
+      printf ("expecting NULL at list end!\n");
+      exit (0);
+    }
+    cv->last->next = x;
+    cv->last = x;
+    beamitem (mytype, NULL, x);
+  }
+  return (x);
+}
+
 static struct feature* addfeature(featuretype mytype, void* newitem)
 /* append a new data element to the linked list for the current voice */
 /* The element can be a note or lots of other things */
@@ -520,13 +575,8 @@ static struct feature* addfeature(featuretype mytype, void* newitem)
     exit(0);
   };
   x = (struct feature*)checkmalloc(sizeof(struct feature));
-  x->next = NULL;
-  x->type = mytype;
-  x->item = newitem;
-  x->xleft = 0;
-  x->xright = 0;
-  x->yup = 0;
-  x->ydown = 0;
+  init_feature (x, mytype);
+  x->item.voidptr = newitem;
   if (cv->first == NULL) {
     cv->first = x;
     cv->last = x;
@@ -557,60 +607,37 @@ struct llist* newlist()
   return(l);
 }
 
-static int notenum(int octave, char ch, enum cleftype clef, int clefoctave)
+static int notenum(int octave, char ch, cleftype_t * clef)
 /* converts note to number for stave position */
 /* note E is zero (bottom line of stave) */
 {
   int n;
 
-  n = 5 + (7 + ch -'c')%7 + 7*(octave-1);
-  switch (clef) {
-  case treble:
-    break;
-  case soprano:
-    n = n + 2;
-    break;
-  case mezzo:
-    n = n + 4;
-    break;
-  case alto:
-    n = n + 6;
-    break;
-  case tenor:
-    n = n + 8;
-    break;
-  case baritone:
-    n = n + 10;
-    break;
-  case bass:
-    n = n + 12;
-    break;
-  case noclef:
-    break;
-  };
-  switch (clefoctave) {
-  case -22:
-    n = n + 21;
-    break;
-  case -15:
-    n = n + 14;
-    break;
-  case -8:
-    n = n + 7;
-    break;
-  case 8:
-    n = n - 7;
-    break;
-  case 15:
-    n = n - 14;
-    break;
-  case 22:
-    n = n - 21;
-    break;
-  default:
-    break;
-  };
-  return(n);
+  n = 1 + (7 + ch - 'c') % 7 + 7 * (octave - 1);
+  /* apply shift associated with type of clef */
+  switch (clef->basic_clef) {
+    default:
+    case basic_clef_treble:
+    case basic_clef_auto:
+    case basic_clef_perc:
+    case basic_clef_none:
+    case basic_clef_undefined:
+      /* no shift */
+      break;
+    case basic_clef_bass:
+      n = n + 8;
+      break;
+    case basic_clef_alto:
+      n = n + 4;
+      break;
+  }
+  /* apply any shift from the placing of the clef */
+  n = n + (2 * clef->staveline);
+  /* We ignore octave shift from the clef. This is understood as an
+   * instruction to the player to play in a different octave, but
+   * the written notes do not change position.
+   */
+  return (n);
 }
 
 int count_dots(int *base, int *base_exp, int n, int m)
@@ -685,9 +712,10 @@ static char* decstring(int decorators[])
   };
 }
 
-static struct note* newnote(decorators, xaccidental, xmult, xnote, xoctave, 
+static struct note* newnote(decorators, clef, xaccidental, xmult, xnote, xoctave, 
                             a, b)
 int decorators[DECSIZE];
+cleftype_t *clef; /* [JA] 2020-10-19 */
 int xmult;
 char xaccidental, xnote;
 int xoctave;
@@ -712,13 +740,13 @@ int a, b;
   n->mult = xmult; 
   n->octave = xoctave;
   n->pitch = xnote;
-  n->y = notenum(xoctave, xnote, cv->clef->type, cv->clef->octave);
+  n->y = notenum(xoctave, xnote, clef);
   if (n->y < 4) {
     n->stemup = 1;
   } else {
     n->stemup = 0;
   };
-  n->stemlength = 0.0;
+  n->beaming = single;          /* initial default value */
   n->syllables = NULL;
   if (cv->ingrace) {
     n->gchords = NULL;
@@ -729,6 +757,7 @@ int a, b;
     n->instructions = cv->instructions_pending;
     cv->instructions_pending = NULL;
   };
+  n->stemlength = 0.0;
   return(n);
 }
 
@@ -792,7 +821,6 @@ static struct voice* newvoice(int n)
   v->inslur = 0;
   v->ingrace = 0;
   v->inchord = 0;
-  v->expect_repeat = 0;
   v->tuplenotes = 0;
   v->thistuple = NULL;
   v->tuple_count = 0;
@@ -802,8 +830,8 @@ static struct voice* newvoice(int n)
   v->slurcount = 0;
   v->barno = 0;
   v->barchecking = thetune.barchecking;
-  setfract(&v->barlen, thetune.meter.num, thetune.meter.denom);
-  v->clef = newclef(thetune.clef.type, thetune.clef.octave);
+  setfract (&v->barlen, thetune.timesig.num, thetune.timesig.denom);
+  v->clef = newclef(&thetune.clef);
   if (thetune.keysig == NULL) {
     printf("Trying to set up voice with no key signature\n");
     exit(0);
@@ -813,7 +841,7 @@ static struct voice* newvoice(int n)
   };
   v->tempo = NULL;
   setfract(&v->barcount, 0, 1);
-  setfract(&v->meter, thetune.meter.num, thetune.meter.denom);
+  copy_timesig(&v->timesig, &thetune.timesig);
   v->lastnote = NULL;
   v->laststart = NULL;
   v->lastend = NULL;
@@ -824,6 +852,7 @@ static struct voice* newvoice(int n)
   v->instructions_pending = NULL;
   v->beamed_tuple_pending = 0;
   v->linestart = NULL;
+  v->lyrics_end = NULL;
   v->lineend = NULL;
   v->more_lyrics = 0;
   v->lyric_errors = 0;
@@ -877,12 +906,12 @@ static void init_tune(struct tune* t, int x)
   t->parts = NULL;
   init_llist(&t->notes);
   init_llist(&t->voices);
-  setfract(&t->meter, 0, 1);
+  init_timesig(&t->timesig);
   setfract(&t->unitlen, 0, 1);
   t->cv = NULL;
   t->keysig = NULL;
-  t->clef.type = treble;
-  t->clef.octave = 0;
+  init_new_clef (&t->clef);
+  get_standard_clef ("treble", &t->clef); /* default to treble clef */
   t->tempo = NULL;
   init_llist(&t->words);
 };
@@ -917,6 +946,7 @@ static void freefeature(void* item, featuretype type)
 
   switch(type) {
   case NOTE:
+  case CHORDNOTE:
     n = item;
     if (n->accents != NULL) {
       free(n->accents);
@@ -980,7 +1010,7 @@ static void freevoice(struct voice* v)
 
   ft = v->first;
   while (ft != NULL) {
-    freefeature(ft->item, ft->type);
+    freefeature(ft->item.voidptr, ft->type);
     oldft = ft;
     ft = ft->next;
     free(oldft);
@@ -991,6 +1021,7 @@ static void freevoice(struct voice* v)
   };
   if (v->tempo != NULL) {
     freetempo(v->tempo);
+    free (v->tempo);
     v->tempo = NULL;
   };
   if (v->clef != NULL) {
@@ -1024,6 +1055,7 @@ static void freetune(struct tune* t)
   };
   if (t->tempo != NULL) {
     freetempo(t->tempo);
+    free(t->tempo);
     t->tempo = NULL;
   };
   v = firstitem(&t->voices);
@@ -1192,14 +1224,29 @@ char** filename;
   };
   fileopen = 0;
   filearg = getarg("-o", argc, argv);
+  /* beware of security risk from buffer overflows here [JA] 2020-11-01*/
   if (filearg != -1) { 
-    /*strcpy(outputname, argv[filearg]); security risk buffer overflow */
-    /* strncpy(outputname, argv[filearg],sizeof(outputname)-1);  [SDG] 2020-06-03 */
-    snprintf(outputname, sizeof(outputname)-1,"%s",argv[filearg]); /* [SDG] 2020-06-03 */
+    if (strlen(argv[filearg]) > MAX_OUTPUTROOT)  /* [JA] 2020-11-01 */
+    {
+      printf("Specified output filename exceeds limit.\n");
+      exit(1);
+    }
+#ifdef NO_SNPRINTF
+    sprintf(outputname, "%s",argv[filearg]); /* [SS] 2020-11-01 */
+#else
+    snprintf(outputname, MAX_OUTPUTROOT,"%s",argv[filearg]);
+#endif
   } else {
-    /* strcpy(outputname, argv[1]); security risk: buffer overflow */
-    /* strncpy(outputname, argv[1],sizeof(outputname)-4);  [SDG] 2020-06-03 */
-    snprintf(outputname,sizeof(outputname)-4,"%s", argv[1]); /* [SDG] 2020-06-03 */
+    if (strlen(argv[1]) > MAX_OUTPUTROOT)
+    {
+      printf("Implied output filename exceeds limit.\n");
+      exit(1);
+    }
+#ifdef NO_SNPRINTF
+    sprintf(outputname,"%s", argv[1]);  /* [SS] 2020-11-01 */
+#else
+    snprintf(outputname,MAX_OUTPUTROOT,"%s", argv[1]);
+#endif
     place = strchr(outputname, '.');
     if (place == NULL) {
       strcat(outputname, ".ps");
@@ -1338,8 +1385,7 @@ event_error("extended overlay not implemented in yaps");
 
 void event_split_voice()
 {
-/* [SS] 2015-11-15 * changed (void*) to (int *) */
-addfeature(SPLITVOICE, (int *)  lineno);
+addnumberfeature(SPLITVOICE, lineno);
 event_error("voice split not implemented in yaps");
 }
 
@@ -1354,7 +1400,7 @@ void event_linebreak()
 {
 /* [SS] 2015-11-15 * changed (void*) to (int *) */
   if (xinbody) {
-    addfeature(LINENUM, (int *)lineno);
+    addnumberfeature(LINENUM, lineno);
   };
 }
 
@@ -1368,7 +1414,7 @@ static void tidy_ties()
 
   for (i=0; i<cv->tiespending; i++) {
     ft = cv->tie_place[i]; /* pointer to TIE feature */
-    s = ft->item;
+    s = ft->item.voidptr;
     addfeature(CLOSE_TIE, s);
   };
 }
@@ -1376,17 +1422,25 @@ static void tidy_ties()
 void event_startmusicline()
 /* We are at the start of a line of abc notes */
 {
-  cv->linestart = addfeature(MUSICLINE, (void*)NULL);
+  voice_context_t *parser_voice;
+
+  parser_voice = &voicecode[voicenum - 1];
+  cv->linestart = addnumberfeature(MUSICLINE, 0);
+  cv->lyrics_end = NULL;
   if (cv->more_lyrics != 0) {
     event_error("Missing continuation w: field");
     cv->more_lyrics = 0;
   };
   if ((cv->line == header) || (cv->line == newline)) {
-    addfeature(CLEF, newclef(cv->clef->type, cv->clef->octave));
+    addfeature(CLEF, newclef(cv->clef));
     addfeature(KEY, newkey(cv->keysig->name, cv->keysig->sharps,
                            cv->keysig->map, cv->keysig->mult));
     if ((cv->line == header)||(cv->changetime)) {
-      addfeature(TIME, newfract(cv->meter.num, cv->meter.denom));
+      timesig_details_t *timesig;
+
+      timesig = newtimesig();
+      copy_timesig(timesig, &parser_voice->timesig);
+      addfeature (TIME, timesig);
       cv->changetime = 0;
     };
     cv->line = midline;
@@ -1404,7 +1458,7 @@ static void divide_ties()
 
   for (i=0; i<cv->tiespending; i++) {
     ft = cv->tie_place[i]; /* pointer to TIE feature */
-    s = ft->item;
+    s = ft->item.voidptr;
     s->crossline = 1;
   };
   for (i=0; i<cv->slurcount; i++) {
@@ -1413,11 +1467,26 @@ static void divide_ties()
   };
 }
 
+/* A score_linebreak has been encountered [JA] 2020-10-07*/
+void event_score_linebreak (char ch)
+{
+
+  if (xinbody) {
+    /* end current score line - code from endmusicline */
+    cv->lineend = addnumberfeature (MUSICSTOP, 0);
+    addfeature (PRINTLINE, newvertspacing ());
+    cv->line = newline;
+    divide_ties ();
+    /* start new score line - startmusicline */
+    event_startmusicline ();
+  }
+}
+
 void event_endmusicline(endchar)
 char endchar;
 /* We are at the end of a line of abc notes */
 {
-  cv->lineend = addfeature(MUSICSTOP, (void*)NULL);
+  cv->lineend = addnumberfeature(MUSICSTOP, 0);
   if ((endchar == ' ') || (endchar == '!')) {
     addfeature(PRINTLINE, newvertspacing());
     cv->line = newline;
@@ -1515,7 +1584,7 @@ char *str; /* string following first word */
           vskip(vspace);
         };
       } else {
-        addfeature(VSKIP, (int*)((int)vspace));
+        addnumberfeature(VSKIP, (int)vspace);
       };
     };
   };
@@ -1619,7 +1688,7 @@ struct feature* apply_syll(char* s, struct feature* wordplace, int* errors)
     return(ft);
   };
   if (ft->type == NOTE) {
-    n = ft->item;
+    n = ft->item.voidptr;
     if (n->syllables == NULL) {
       n->syllables = newlist();
     };
@@ -1644,8 +1713,10 @@ struct feature* apply_syll(char* s, struct feature* wordplace, int* errors)
   return(ft);
 }
 
-void event_words(p, continuation)
+/* [JA] 2022.06.14 */
+void event_words(p, append, continuation)
 char* p;
+int append;
 int continuation;
 /* A line of lyrics (w: ) has been encountered in the abc */
 {
@@ -1661,7 +1732,11 @@ int continuation;
     };
     return;
   };
-  wordplace = cv->linestart;
+  if (append && (cv->lyrics_end != NULL)) {
+    wordplace = cv->lyrics_end;
+  } else {
+    wordplace = cv->linestart;
+  }
   if (cv->more_lyrics) {
     errors = cv->lyric_errors;
   } else {
@@ -1723,6 +1798,7 @@ int continuation;
       };
     }; 
   };
+  cv->lyrics_end = wordplace;
   if (continuation) {
     cv->more_lyrics = 1;
     cv->lyric_errors = errors;
@@ -1732,11 +1808,11 @@ int continuation;
     if (errors > 0) {
       event_error("Lyric line too long for music");
     } else {
-      clearvstring(&syll);
-      wordplace = apply_syll(syll.st, wordplace, &errors);
-      if (errors == 0) {
-        event_error("Lyric line too short for music");
-      };
+//      clearvstring(&syll);
+//      wordplace = apply_syll(syll.st, wordplace, &errors);
+//      if (errors == 0) {
+//        event_error("Lyric line too short for music");
+//      };
     };
   };
   freevstring(&syll);
@@ -1781,6 +1857,12 @@ struct voice_params *vp;
 {
   if (xinbody) {
     setvoice(n);
+    if (vp->gotclef) {
+      event_clef (vp->clefname, &vp->new_clef);
+    }
+    if (vp->gotoctave) {
+      event_octave (vp->octave, 0);
+    }
   } else {
     if (!suppress) {
       event_error("V: field outside tune body");
@@ -1803,6 +1885,13 @@ int n;
       };
     };
   };
+}
+
+void event_default_length (n)
+     int n;
+/* Handles a missing L: field */
+{
+  event_length(n);
 }
 
 void event_refno(n)
@@ -1864,110 +1953,51 @@ char *post; /* text after tempo */
   };
 }
 
-void event_timesig(n, m, checkbars)
-int n, m, checkbars;
+void event_timesig (timesig)
+  timesig_details_t *timesig;
 /* A time signature (M: ) has been encountered in the abc */
 {
+  int checkbars;
+
+  if (timesig->type == TIMESIG_FREE_METER) {
+    checkbars = 0;
+  } else {
+    checkbars = 1;
+  }
   if (xinhead) {
-    setfract(&thetune.meter, n, m);
+    copy_timesig(&thetune.timesig, timesig);
     thetune.barchecking = checkbars;
   } else {
     if (xinbody) {
-      if (checkbars == 1) {
-        addfeature(TIME, newfract(n,m));
-        setfract(&cv->meter, n, m);
-        setfract(&cv->barlen, n, m);
-        if (cv->line != midline) {
-          cv->changetime = 1;
-        };
-        cv->barchecking = 1;
-      } else {
-        cv->barchecking = 0;
-      };
+      timesig_details_t *time_timesig;
+
+      time_timesig = newtimesig();
+      copy_timesig(time_timesig, timesig);
+      addfeature (TIME, time_timesig);
+      setfract (&cv->barlen, timesig->num, timesig->denom);
+      if (cv->line != midline) {
+        cv->changetime = 1;
+      }
     } else {
       if (!suppress) {
-        event_warning("M: field outside tune ignored");
+        event_warning ("M: field outside tune ignored");
       };
     };
   };
 }
 
-enum cleftype findclef(clefstr, oct)
-char* clefstr;
-int* oct;
-/* converts a clef name string to an enumerated type */
-/* also looks for +8 +15 +22 -8 -15 -22 octave shift */
-{
-  enum cleftype type;
-  char* p;
-  int interval;
-
-  type = noclef;
-  p = clefstr;
-  if (strncmp(clefstr, "treble", 6)==0) {
-    type = treble;
-    p = p + 6;
-  };
-  if (strncmp(clefstr, "bass", 4)==0) {
-    type = bass;
-    p = p + 4;
-  };
-  if (strncmp(clefstr, "baritone", 8)==0) {
-    type = baritone;
-    p = p + 8;
-  };
-  if (strncmp(clefstr, "tenor", 5)==0) {
-    type = tenor;
-    p = p + 5;
-  };
-  if (strncmp(clefstr, "alto", 4)==0) {
-    type = alto;
-    p = p + 4;
-  };
-  if (strncmp(clefstr, "mezzo", 5)==0) {
-    type = mezzo;
-    p = p + 5;
-  };
-  if (strncmp(clefstr, "mezzo-soprano", 13)==0) {
-    type = mezzo;
-    p = p + 13;
-  };
-  if (strncmp(clefstr, "soprano", 7)==0) {
-    type = soprano;
-    p = p + 7;
-  };
-  interval = 0;
-  if ((type != noclef) && ((*p == '+') || (*p == '-'))) {
-    sscanf(p+1, "%d", &interval);
-    if ((interval == 8) || (interval == 15) || (interval == 22)) {
-      if (*p == '-') {
-        interval = -interval;
-      };
-    } else {
-      interval = 0;
-    };
-  };
-  *oct = interval;
-  return(type);
-}
-
-void event_clef(char* clefstr)
+void event_clef(char* clefstr, cleftype_t * new_clef)
 /* a clef has been encountered in the abc */
 {
-  enum cleftype clef;
-  int num;
-
-  clef = findclef(clefstr, &num);
+  if (new_clef->basic_clef == basic_clef_undefined) {
+    return;
+  }
   if (xinbody) {
-    cv->clef->type = clef;
-    cv->clef->octave = num;
-    addfeature(CLEF, newclef(clef, num));
+    copy_clef (cv->clef, new_clef);
+    addfeature (CLEF, newclef (new_clef));
   };
   if ((xinhead) && (!xinbody)) {
-    if (clef != noclef) {
-       thetune.clef.type = clef;
-       thetune.clef.octave = num;
-    };
+    copy_clef (&thetune.clef, new_clef);
   };
 }
 
@@ -2037,22 +2067,8 @@ static void start_body()
 /* default values for anything not explicitly declared */
 {
   parseron();
-  if (thetune.meter.num == 0) {
-    event_warning("no M: field, assuming 4/4");
-    /* generate missing time signature */
-    event_timesig(4, 4, 1);
-    event_linebreak();
-  };
-  if (thetune.unitlen.num == 0) {
-    event_warning("no L: field, using default rule");
-    if ((double) thetune.meter.num / (double) thetune.meter.denom < 0.75) {
-      /*setfract(&thetune.unitlen, 1, 16); [SS] 2004-09-06 */
-      event_length(16);
-    } else {
-     /* setfract(&thetune.unitlen, 1, 8); */
-      event_length(8);
-    };
-  };
+  /* missing M: is handled by setting default M:none */
+  /* missing L: is handled by event_default_length */
   if (thetune.tempo != NULL) {
     resolve_tempo(thetune.tempo, &thetune.unitlen);
   };
@@ -2104,7 +2120,8 @@ void event_octave(int num, int local)
   };
 }
 
-void event_key(sharps, s, minor, modmap, modmul, modmicrotone, gotkey, gotclef, clefstr,
+void event_key(sharps, s, minor, modmap, modmul, modmicrotone, gotkey,
+          gotclef, clefstr, new_clef,
           octave, transpose, gotoctave, gottranspose, explict)
 int sharps;
 char *s;
@@ -2113,21 +2130,26 @@ char modmap[7];
 int modmul[7];
 struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
-char* clefstr;
+char* clefstr;  /* [JA] 2020-10-19 */
+cleftype_t * new_clef;
 int octave, transpose, gotoctave, gottranspose;
 int explict;
 /* A key field (K: ) has been encountered */
 {
   if (xinhead || xinbody) {
     if (gotclef==1) {
-      event_clef(clefstr);
+      event_clef(clefstr, new_clef);
     };
     if (gotkey==1) {
       event_true_key(sharps, s, minor, modmap, modmul);
     };
   };
+  if (gotclef)
+  {
+    event_octave(new_clef->octave_offset, 0);
+  }
   if (gotoctave) {
-    event_octave(octave,0);
+    event_octave(octave, 0);
   };
 }
 
@@ -2179,46 +2201,7 @@ char* playonrep_list;
   };
   checkbar(type); /* increment bar number if bar complete */
 /* [SS] 2015-11-15 * changed (void*) to (int *) */
-  addfeature(type, (int *)cv->barno); /* save bar number */
-  switch(type) {
-  case SINGLE_BAR:
-    break;
-  case DOUBLE_BAR:
-    break;
-  case THIN_THICK:
-    break;
-  case THICK_THIN:
-    break;
-  case BAR_REP:
-    if ((cv->expect_repeat) && (repcheck)) {
-      event_error("Expecting repeat, found |:");
-    };
-    cv->expect_repeat = 1;
-    break;
-  case REP_BAR:
-    if ((!cv->expect_repeat) && (repcheck)) {
-      event_error("No repeat expected, found :|");
-    };
-    cv->expect_repeat = 0;
-    break;
-  case BAR1:
-    if ((!cv->expect_repeat) && (repcheck)) {
-      event_error("found |1 in non-repeat section");
-    };
-    break;
-  case REP_BAR2:
-    if ((!cv->expect_repeat) && (repcheck)) {
-      event_error("No repeat expected, found :|2");
-    };
-    cv->expect_repeat = 0;
-    break;
-  case DOUBLE_REP:
-    if ((!cv->expect_repeat) && (repcheck)) {
-      event_error("No repeat expected, found ::");
-    };
-    cv->expect_repeat = 1;
-    break;
-  };
+  addnumberfeature(type, cv->barno); /* save bar number */
   if ((playonrep_list != NULL) && (strlen(playonrep_list) > 0)) {
     event_playonrep(playonrep_list);
   };
@@ -2496,12 +2479,12 @@ static void resolve_ties(struct feature* f)
   struct note* n;
   int i, j;
 
-  n = f->item;
+  n = f->item.voidptr;
   for (i=0; i<cv->tiespending; i++) {
     ft = cv->tie_place[i]; /* pointer to TIE feature */
-    s = ft->item;
+    s = ft->item.voidptr;
     ft = s->begin; /* pointer to NOTE feature */
-    m = ft->item;
+    m = ft->item.voidptr;
     if (m->y == n->y) { /* pitch match found */
       s->end = f;
       j = cv->tiespending;
@@ -2577,7 +2560,7 @@ int a, b;
   struct fract* afract;
 
   if (n->type == NOTE) {
-    anote =  n->item;
+    anote =  n->item.voidptr;
     afract = &anote->len;
     afract->num = afract->num * a;
     afract->denom = afract->denom * b;
@@ -2587,7 +2570,7 @@ int a, b;
                              anote->len.num, anote->len.denom);
   };
   if (n->type == REST) {
-    arest =  n->item;
+    arest =  n->item.voidptr;
     afract = &arest->len;
     afract->num = afract->num * a;
     afract->denom = afract->denom * b;
@@ -2607,11 +2590,11 @@ struct fract* getlenfract(struct feature *f)
 
   len = NULL;
   if (f->type == NOTE) {
-    anote = f->item;
+    anote = f->item.voidptr;
     len = &(anote->len);
   };
   if (f->type == REST) {
-    arest = f->item;
+    arest = f->item.voidptr;
     len = &(arest->len);
   };
   return(len);
@@ -2659,8 +2642,8 @@ static void brokenadjust()
     fr1 = getlenfract(cv->laststart);
     fr2 = getlenfract(cv->thisstart);
 /*
-    fr1 = cv->laststart->item;
-    fr2 = cv->thisstart->item;
+    fr1 = cv->laststart->item.voidptr;
+    fr2 = cv->thisstart->item.voidptr;
 */
     if ((fr1->num * fr2->denom) != (fr2->num * fr1->denom)) {
       failed = 1;
@@ -2773,11 +2756,11 @@ struct feature* f;
 struct note* anote;
 if (chord_n ==1 && chord_m ==1) return;
 f = chordplace->next;
-anote = f->item;
+anote = f->item.voidptr;
 /* remove old note length from barcount */
 addfractions(&cv->barcount, -anote->len.num, anote->len.denom);
 while ((f != NULL)&&((f->type==NOTE)||(f->type=CHORDNOTE))) {
-   anote = f->item;
+   anote = f->item.voidptr;
    /* remove old note length from barcount */
    setfract(&anote->len, chord_n*cv->unitlen.num, chord_m*cv->unitlen.denom);
    reducef(&anote->len);
@@ -2809,8 +2792,8 @@ void event_chordoff(int chord_n, int chord_m)
   };
   ft = cv->chordplace;
   if ((ft != NULL) && (ft->next != NULL) && (ft->next->type == NOTE)) {
-    thechord = ft->item;
-    firstnote = ft->next->item;
+    thechord = ft->item.voidptr;
+    firstnote = ft->next->item.voidptr;
     /* beaming for 1st note in chord */
     beamitem(NOTE, firstnote, ft->next);
     markchord(ft);
@@ -2904,8 +2887,9 @@ char c; /* [SS] 2017-04-19 to distinguish X from Z in abc2abc */
   xevent_rest(1, 1, n);
 }
 
-void event_note(decorators, xaccidental, xmult, xnote, xoctave, n, m)
+void event_note(decorators, clef, xaccidental, xmult, xnote, xoctave, n, m)
 int decorators[DECSIZE];
+cleftype_t *clef; /* [JA] 2020-10-19 */
 int xmult;
 char xaccidental, xnote;
 int xoctave, n, m;
@@ -2916,7 +2900,7 @@ int xoctave, n, m;
   struct chord* thechord;
   int pitchval;
 
-  nt = newnote(decorators, xaccidental, xmult, xnote, xoctave+cv->octaveshift, 
+  nt = newnote(decorators, clef, xaccidental, xmult, xnote, xoctave, 
                n * cv->unitlen.num, m * cv->unitlen.denom);
   nt->tuplenotes = cv->tuplenotes;
   noteplace = addfeature(NOTE, nt);
@@ -2931,7 +2915,7 @@ int xoctave, n, m;
     advance_ties();
   } else {
     thechord = cv->thischord;
-    pitchval = notenum(xoctave, xnote, cv->clef->type, cv->clef->octave);
+    pitchval = notenum(xoctave, xnote, clef);
     if (cv->chordcount == 0) {
       thechord->ytop = pitchval;
       thechord->ybot = pitchval;
@@ -2969,7 +2953,7 @@ void event_microtone(int dir, int a, int b)
 {
 }
 
-void event_temperament(char **line) {
+void event_temperament(char *line) {
 }
 
 
@@ -2987,7 +2971,17 @@ char* value;
   int num;
 
   if (strcmp(key, "clef")==0) {
-    event_clef(value);
+    cleftype_t new_clef; /* [JA] 2020-10-19 */
+    int valid_clef;
+
+    init_new_clef (&new_clef);
+    valid_clef = get_standard_clef (value, &new_clef);
+    if (!valid_clef) {
+      valid_clef = get_extended_clef_details (value, &new_clef);
+    }
+    if (valid_clef) {
+      event_clef (value, &new_clef);
+    }
   };
   if (strcmp(key, "octave")==0) {
     num = readsnumf(value);

@@ -45,8 +45,9 @@
  * based on public domain 'midifilelib' package.
  */
 
-#define VERSION "3.46 June 22 2020 midi2abc"
+#define VERSION "3.58 December 09 2022 midi2abc"
 
+#include <limits.h>
 /* Microsoft Visual C++ Version 6.0 or higher */
 #ifdef _MSC_VER
 #define snprintf _snprintf
@@ -78,12 +79,9 @@ extern char* strchr();
 #define MIDDLE 72
 void initfuncs();
 void setupkey(int);
-void stats_finish();
 int testtrack(int trackno, int barbeats, int anacrusis);
 int open_note(int chan, int pitch, int vol);
 int close_note(int chan, int pitch, int *initvol);
-float histogram_entropy (int *histogram, int size); 
-void stats_noteoff(int chan,int pitch,int vol);
 void reset_back_array (); /* [SS] 2019-05-08 */ 
 
 
@@ -96,6 +94,7 @@ static FILE *outhandle; /* for producing the abc file */
 
 int tracknum=0;  /* track number */
 int division;    /* pulses per quarter note defined in MIDI header    */
+int quietLimit; /* minumum number of pulses with no activity */
 long tempo = 500000; /* the default tempo is 120 quarter notes/minute */
 int unitlen;     /* abc unit length usually defined in L: field       */
 int header_unitlen; /* first unitlen set                              */
@@ -164,6 +163,7 @@ int header_keysig=  -50;  /* header key signature                     */
 int active_keysig = -50;  /* last key signature declared        */
 int xchannel;  /* channel number to be extracted. -1 means all  */
 int timeunits = 1; /*tells prtime to display time in beats [SS] 2018-10-25 */
+double bend2cents = 40.96; /* [SS] 2022-02-12 */
 
 
 /* structure for storing music notes */
@@ -248,65 +248,7 @@ void txt_trackstart_type0();
 void txt_noteon_type0(int,int,int);
 void txt_program_type0(int,int);
 
-/* The following variables are used by the -stats option
- * which is used by a separate application called midiexplorer.tcl.
- * The channel numbers go from 1 to 16 instead of 0 to 15
- */
-struct trkstat {
-  int notecount[17];
-  int chordcount[17];
-  int notemeanpitch[17];
-  int notelength[17];
-  int pitchbend[17];
-  int pressure[17];
-  int cntlparam[17];
-  int program[17];
-  int tempo[17];
-  int npulses[17];
-  } trkdata;
 
-/* The trkstat references the individual channels in the midi file.
- * notecount is the number of notes or bass notes in the chord.
- * chordcount is the number of notes not counting the bass notes.
- * notemeanpitch is the average pitch for the channel.
- * notelength is the average note length.
- * pitchbend is the number of pitch bends for the channel.
- * pressure is the number of control pressure commands.
- * cntlparam is the number of control parameter commands.
- * program is number of times there is a program command for the channel.
- * tempo is the number of times there is a tempo command.
- * npulses is the number of pulses.
- */
-
-int progcolor[17]; /* used by stats_program */
-int drumhistogram[82]; /* counts drum noteons */
-int pitchhistogram[12]; /* pitch distribution for non drum notes */
-int channel2prog[17]; /* maps channel to program */
-int channel2nnotes[17]; /*maps channel to note count */
-int chnactivity[17]; /* [SS] 2018-02-02 */
-int progactivity[128]; /* [SS] 2018-02-02 */
-int pitchclass_activity[12]; /* [SS] 2018-02-02 */
-
-
-/* [SS] 2017-11-01 */
-static int progmapper[] = {
- 0,  0,  0,  0,  0,  0,  0,  0,
- 0,  1,  1,  1,  1,  1,  1,  2,
- 3,  3,  3,  3,  3,  3,  3,  3,
- 2,  2,  4,  4,  4,  4,  4,  2,
- 5,  5,  5,  5,  5,  5,  5,  5,
- 6,  6,  6,  6,  6,  2,  7, 10,
- 7,  7,  7,  7,  8,  8,  8,  8,
- 9,  9,  9,  9,  9,  9,  9,  9,
-11, 11, 11, 11, 11, 11, 11, 11,
-12, 12, 12, 12, 12, 12, 12, 12,
-13, 13, 13, 13, 13, 13, 13, 13,
-14, 14, 14, 14, 14, 14, 14, 14,
-15, 15, 15, 15, 15, 15, 15, 15,
- 2,  2,  2,  2,  2, 12,  6, 12,
- 1,  1, 10, 10, 10, 10, 10,  1,
-16, 16, 16, 16, 16, 16, 16, 16
-};
 
 /*              Stage 1. Parsing MIDI file                   */
 
@@ -375,6 +317,7 @@ char* s;
   if (numbytes > 1024) numbytes = 1024; /* [SS] 2019-08-11 */
   p = (char*) checkmalloc(numbytes); /* [SS] 2019-04-13  2019-08-11*/
   strncpy(p, s,numbytes); /* [SS] 2017-08-30 [SDG] 2020-06-03 */
+  p[numbytes-1] = '\0'; /* [JA] 2020-11-01 */
   return(p);
 }
 
@@ -603,15 +546,6 @@ char *s;
 }
 
 
-/* [SS] 2017-11-19 */
-void stats_error(s)
-char *s;
-{
-    fprintf(stderr,"Error: %s\n",s);
-    fprintf(stderr,"activetrack %d\n",tracknum);
-    stats_finish();
-}
-
 
 
 void txt_header(xformat,ntrks,ldivision)
@@ -725,11 +659,6 @@ int chan, pitch, press;
 {
 }
 
-void stats_pressure(chan,press)
-int chan, press;
-{
-trkdata.pressure[0]++;
-}
 
 void txt_parameter(chan,control,value)
 int chan, control, value;
@@ -807,7 +736,7 @@ char *mess;
   int n;
   char *p = mess;
   char *buff;
-  char buffer2[BUFFSIZE];
+  char buffer2[BUFFSIZE+4]; /* [SS] 2022-02-12 */
 
   if ((type < 1)||(type > unrecognized))
       type = unrecognized;
@@ -1133,139 +1062,7 @@ void mftxt_header (int format, int ntrks, int ldivision)
 }
 
 
-void stats_header (int format, int ntrks, int ldivision)
-{
-  int i;
-  division = ldivision;
-  printf("ntrks %d\n",ntrks);
-  printf("ppqn %d\n",ldivision);
-  chordthreshold = ldivision/16; /* [SS] 2018-01-21 */
-  trkdata.tempo[0] = 0;
-  trkdata.pressure[0] = 0;
-  trkdata.program[0] = 0;
-  for (i=0;i<17;i++) {
-    trkdata.npulses[i] = 0;
-    trkdata.pitchbend[i] = 0;
-    progcolor[i] = 0;
-    channel2prog[i] = -1;
-    channel2nnotes[i] = 0;
-    chnactivity[i] = 0; /* [SS] 2018-02-02 */
-    }
-  for (i=0;i<82;i++) drumhistogram[i] = 0;
-  for (i=0;i<12;i++) pitchhistogram[i] = 0; /* [SS] 2017-11-01 */
-  for (i=0;i<12;i++) pitchclass_activity[i] = 0; /* [SS] 2018-02-02 */
-  for (i=0;i<128;i++) progactivity[i] = 0; /* [SS] 2018-02-02 */
-}
 
-void determine_progcolor ()
-{
-int i;
-for (i=0;i<17;i++) progcolor[i] =0;
-for (i=0;i<128;i++) {
-  progcolor[progmapper[i]] += progactivity[i];
-  }
-}
-
-
-/* [SS] 2018-04-24 */
-void output_progs_data () {
-int i;
-/* check that there is valid progactivity */
-
-  printf("progs ");
-  for (i=0;i<128;i++) 
-    if(progactivity[i] > 0) printf(" %d",i);
-  printf("\nprogsact ");
-  for (i=0;i<128;i++) 
-    if(progactivity[i] > 0) printf(" %d",progactivity[i]);
-  }
-
-
-
-void stats_finish()
-{
-int i; /* [SDG] 2020-06-03 */
-int npulses;
-int nprogs;
-
-npulses = trkdata.npulses[0]; 
-printf("npulses %d\n",trkdata.npulses[0]);
-printf("tempocmds %d\n",trkdata.tempo[0]);
-printf("pitchbends %d\n",trkdata.pitchbend[0]);
-for (i=1;i<17;i++) {
-  if (trkdata.pitchbend[i] > 0) {
-    printf("pitchbendin %d %d\n",i,trkdata.pitchbend[i]); }
-    }
- 
-if (trkdata.pressure[0] > 0) 
-  printf("pressure %d\n",trkdata.pressure[0]);
-printf("programcmd %d\n",trkdata.program[0]);
-
-nprogs = 0; /* [SS] 2018-04-24 */
-for (i=1;i<128;i++)
-  if(progactivity[i] >0) nprogs++;
-if (nprogs > 0) output_progs_data();
-else {
-  for (i=0;i<17;i++) 
-    if(chnactivity[i] > 0) 
-       progactivity[channel2prog[i]] = chnactivity[i];
-  output_progs_data();
-  }
-
-determine_progcolor();
-printf("\nprogcolor ");
-if (npulses > 0)
-  for (i=0;i<17;i++) printf("%5.2f ",progcolor[i]/(double) npulses);
-else 
-  for (i=0;i<17;i++) printf("%5.2f ",(double) progcolor[i]);
-printf("\n");
-  
-printf("drums ");
-for (i=35;i<82;i++) {
-  if (drumhistogram[i] > 0) printf("%d ",i);
-  }
-printf("\ndrumhits ");
-for (i=35;i<82;i++) {
-  if (drumhistogram[i] > 0) printf("%d ",drumhistogram[i]);
-  }
-
-printf("\npitches "); /* [SS] 2017-11-01 */
-for (i=0;i<12;i++) printf("%d ",pitchhistogram[i]);
-printf("\npitchact "); /* [SS] 2018-02-02 */
-if (npulses > 0)
-  for (i=0;i<12;i++) printf("%5.2f ",pitchclass_activity[i]/(double) npulses);
-else 
-  for (i=0;i<12;i++) printf("%5.2f ",(double) pitchclass_activity[i]);
-printf("\nchnact "); /* [SS] 2018-02-08 */
-if (npulses > 0)
-  for (i=1;i<17;i++) printf("%5.2f ",chnactivity[i]/(double) trkdata.npulses[0]);
-else 
-  for (i=0;i<17;i++) printf("%5.2f ",(double) chnactivity[i]);
-printf("\npitchentropy %f\n",histogram_entropy(pitchclass_activity,12));
-printf("\n");
-}
-
-
-
-float histogram_entropy (int *histogram, int size) 
-  {
-  int i;
-  int total;
-  float entropy;
-  float e,p;
-  total = 0;
-  entropy = 0.0;
-  for (i=0;i<size;i++) {
-    total += histogram[i];
-    } 
-  for (i=0;i<size;i++) {
-    if (histogram[i] < 1) continue;
-    p = (float) histogram[i]/total;
-    e = p*log(p);
-    entropy = entropy + e;
-    } 
-  return -entropy/log(2.0);
-  } 
 
 
 
@@ -1278,65 +1075,7 @@ void mftxt_trackstart()
   printf("Track %d contains %d bytes\n",tracknum,numbytes);
 }
 
-void output_count_trkdata(data_array,name)
-int data_array[];
-char *name;
-{
-int i,sum;
-sum = 0;
-for (i=1;i<17;i++) sum += data_array[i];
-if (sum != 0) {
-      for (i=0;i<17;i++)
-        if(data_array[i]>0) {
-          printf("%s ",name);
-          printf("%d %d ",i,data_array[i]);
-          printf("\n");
-          }
-     }
-}
 
-
-
-void output_track_summary () {
-int i;
-/* find first channel containing data */
-for (i=0;i<17;i++) {
-   if(trkdata.notecount[i] == 0 && trkdata.chordcount[i] == 0) continue; 
-   printf("trkinfo ");
-   printf("%d %d ",i,trkdata.program[i]); /* channel number and program*/
-   printf("%d %d ",trkdata.notecount[i],trkdata.chordcount[i]);
-   printf("%d %d",trkdata.notemeanpitch[i], trkdata.notelength[i]);
-   printf("\n");
-
-   channel2nnotes[i] += trkdata.notecount[i] + trkdata.chordcount[i];
-  }
-}
-
-
-
-
-void stats_trackstart()
-{
-  int i;
-  tracknum++;
-  for (i=0;i<17;i++) {
-     trkdata.notecount[i] = 0;
-     trkdata.notemeanpitch[i] = 0;
-     trkdata.notelength[i] = 0;
-     trkdata.chordcount[i] = 0;
-     trkdata.cntlparam[i] = 0;
-     last_tick[i] = -1;
-     last_on_tick[i] = -1;
-     }
-  printf("trk %d \n",tracknum);
-}
-
-void stats_trackend()
-{
- trkdata.npulses[tracknum] = Mf_currtime; 
- if (trkdata.npulses[0] < Mf_currtime) trkdata.npulses[0] = Mf_currtime;
- output_track_summary();
-}
 
 
 void mftxt_noteon(chan,pitch,vol)
@@ -1353,28 +1092,6 @@ int chan, pitch, vol;
   printf("\n");
 }
 
-void stats_noteon(chan,pitch,vol)
-int chan, pitch, vol;
-{
- if (vol == 0) {
-    /* treat as noteoff */
-    stats_noteoff(chan,pitch,vol);
-    return;
-    }
- trkdata.notemeanpitch[chan+1] += pitch;
- if (abs(Mf_currtime - last_on_tick[chan+1]) < chordthreshold) trkdata.chordcount[chan+1]++;
- else trkdata.notecount[chan+1]++; /* [SS] 2019-08-02 */
- last_tick[chan+1] = Mf_currtime;
- last_on_tick[chan+1] = Mf_currtime; /* [SS] 2019-08-02 */
- /* last_on_tick not updated by stats_noteoff */
- if (chan == 9) {
-   if (pitch < 0 || pitch > 81) 
-         printf("****illegal drum value %d\n",pitch);
-   else  drumhistogram[pitch]++;
-   }
- else pitchhistogram[pitch % 12]++;  /* [SS] 2017-11-01 */
-}
-
 
 void mftxt_noteoff(chan,pitch,vol)
 int chan, pitch, vol;
@@ -1389,30 +1106,23 @@ int chan, pitch, vol;
 }
 
 
-void stats_noteoff(int chan,int pitch,int vol)
-{
-  int length;
-  int program;
-  /* ignore if there was no noteon */
-  if (last_tick[chan+1] == -1) return;
-  length = Mf_currtime - last_tick[chan+1];
-  trkdata.notelength[chan+1] += length;
-  chnactivity[chan+1] += length;
-  if (chan == 9) return; /* drum channel */
-  pitchclass_activity[pitch % 12] += length;
-  program = trkdata.program[chan+1];
-  progactivity[program] += length;
-  /* [SS] 2018-04-18 */
-  if(Mf_currtime > last_tick[chan+1]) last_tick[chan+1] = Mf_currtime;
-}
 
-void mftxt_pressure(chan,pitch,press)
+
+void mftxt_polypressure(chan,pitch,press)
 int chan, pitch, press;
 {
   char *key;
   if (prtime(timeunits)) return;
   key = pitch2key(pitch);
-  printf("Pressure %2d   %3s %3d\n",chan+1,key,press);
+  printf("Polyphonic Key Pressure %2d   %3s %3d\n",chan+1,key,press);
+}
+void mftxt_chanpressure(chan,pitch,press)
+int chan, pitch, press;
+{
+  char *key;
+  if (prtime(timeunits)) return;
+  key = pitch2key(pitch);
+  printf("Pressure %2d   %3s %3d\n",chan+1,key,press); /* [SS] 2022.04.28 */
 }
 
 
@@ -1421,6 +1131,7 @@ int chan, lsb, msb;
 {
  float bend;
  int pitchbend;
+ double cents;
 /*
   if (onlychan >=0 && chan != onlychan) return;
 */
@@ -1428,16 +1139,10 @@ int chan, lsb, msb;
   /* [SS] 2014-01-05  2015-08-04*/
   pitchbend = (msb*128 + lsb);
   bend =  (float) (pitchbend - 8192);
-  bend = bend/40.96;
-  printf("Pitchbend %2d %d  bend = %6.3f (cents)\n",chan+1,pitchbend,bend);
+  cents = bend/bend2cents; /* [SS] 2022-02-12 */
+  printf("Pitchbend %2d %d  cents = %6.3f (cents)\n",chan+1,pitchbend,cents);
 }
 
-void stats_pitchbend(chan,lsb,msb)
-int chan, lsb, msb;
-{
-trkdata.pitchbend[0]++;
-trkdata.pitchbend[chan+1]++;
-}
 
 void mftxt_program(chan,program)
 int chan, program;
@@ -1494,51 +1199,35 @@ static char *patches[] = {
    }
 
 
-void stats_program(chan,program)
-int chan, program;
-{
-int beatnumber;
-if (program <0 || program > 127) return; /* [SS] 2018-03-06 */
-if (trkdata.program[chan+1] != 0) {
-  beatnumber = Mf_currtime/division;
-  printf("cprogram %d %d %d\n",chan+1,program,beatnumber);
-  /* count number of times the program was modified for a channel */
-  trkdata.program[0] = trkdata.program[0]+1;
-  } else {
-  printf("program %d %d\n",chan+1,program);
-  trkdata.program[chan+1] = program;
-  }
-  if (channel2prog[chan+1]== -1) channel2prog[chan+1] = program;
-}
-
 
 void mftxt_parameter(chan,control,value)
 int chan, control, value;
 {
+  /* removal of spaces [SS] 2022-04-06 in ctype array */
   static char *ctype[] = {
- "Bank Select",       "Modulation Wheel",     /*1*/
- "Breath controller", "unknown",              /*3*/
- "Foot Pedal",        "Portamento Time",      /*5*/
- "Data Entry",        "Volume",               /*7*/
+ "BankSelect",       "ModulationWheel",     /*1*/
+ "BreathController", "unknown",              /*3*/
+ "FootPedal",        "PortamentoTime",      /*5*/
+ "DataEntry",        "Volume",               /*7*/
  "Balance",           "unknown",              /*9*/
- "Pan position",      "Expression",           /*11*/
- "Effect Control 1",  "Effect Control 2",     /*13*/
+ "PanPosition",      "Expression",           /*11*/
+ "EffectControl1",  "EffectControl2",     /*13*/
  "unknown",           "unknown",              /*15*/
- "Slider 1",          "Slider 2",             /*17*/
- "Slider 3",          "Slider 4",             /*19*/
+ "Slider1",          "Slider2",             /*17*/
+ "Slider3",          "Slider4",             /*19*/
  "unknown",           "unknown",              /*21*/
  "unknown",           "unknown",              /*23*/
  "unknown",           "unknown",              /*25*/
  "unknown",           "unknown",              /*27*/
  "unknown",           "unknown",              /*29*/
  "unknown",           "unknown",              /*31*/
- "Bank Select (fine)",  "Modulation Wheel (fine)",    /*33*/
- "Breath controller (fine)",  "unknown",              /*35*/
- "Foot Pedal (fine)",   "Portamento Time (fine)",     /*37*/
- "Data Entry (fine)",   "Volume (fine)",              /*39*/
- "Balance (fine)",      "unknown",                    /*41*/
- "Pan position (fine)", "Expression (fine)",          /*43*/
- "Effect Control 1 (fine)",  "Effect Control 2 (fine)", /*45*/
+ "BankSelect(fine)",  "ModulationWheel(fine)",    /*33*/
+ "BreathController(fine)",  "unknown",              /*35*/
+ "FootPedal(fine)",   "PortamentoTime(fine)",     /*37*/
+ "DataEntry(fine)",   "Volume(fine)",              /*39*/
+ "Balance(fine)",      "unknown",                    /*41*/
+ "PanPosition(fine)", "Expression(fine)",          /*43*/
+ "EffectControl1(fine)",  "EffectControl2(fine)", /*45*/
  "unknown",           "unknown",             /*47*/
  "unknown",           "unknown",             /*49*/
  "unknown",           "unknown",             /*51*/
@@ -1548,25 +1237,25 @@ int chan, control, value;
  "unknown",           "unknown",             /*59*/
 "unknown",           "unknown",             /*61*/
  "unknown",           "unknown",             /*63*/
- "Hold Pedal",        "Portamento",          /*65*/
- "Susteno Pedal",     "Soft Pedal",          /*67*/
- "Legato Pedal",      "Hold 2 Pedal",        /*69*/
- "Sound Variation",   "Sound Timbre",        /*71*/
- "Sound Release Time",  "Sound Attack Time", /*73*/
- "Sound Brightness",  "Sound Control 6",     /*75*/
- "Sound Control 7",   "Sound Control 8",     /*77*/
- "Sound Control 9",   "Sound Control 10",    /*79*/
- "GP Button 1",       "GP Button 2",         /*81*/
- "GP Button 3",       "GP Button 4",         /*83*/
+ "HoldPedal",        "Portamento",          /*65*/
+ "SustenoPedal",     "SoftPedal",          /*67*/
+ "LegatoPedal",      "Hold2Pedal",        /*69*/
+ "SoundVariation",   "SoundTimbre",        /*71*/
+ "SoundReleaseTime",  "SoundAttackTime", /*73*/
+ "SoundBrightness",  "SoundControl6",     /*75*/
+ "SoundControl7",   "Sound Control8",     /*77*/
+ "SoundControl9",   "Sound Control10",    /*79*/
+ "GPButton1",       "GPButton2",         /*81*/
+ "GPButton3",       "GPButton4",         /*83*/
  "unknown",           "unknown",             /*85*/
  "unknown",           "unknown",             /*87*/
  "unknown",           "unknown",             /*89*/
- "unknown",           "Effects Level",       /*91*/
- "Tremolo Level",     "Chorus Level",        /*93*/
- "Celeste Level",     "Phaser Level",        /*95*/
- "Data button increment",  "Data button decrement", /*97*/
- "NRP (fine)",        "NRP (coarse)",        /*99*/
- "Registered parameter (fine)", "Registered parameter (coarse)", /*101*/
+ "unknown",           "EffectsLevel",       /*91*/
+ "TremoloLevel",     "ChorusLevel",        /*93*/
+ "CelesteLevel",     "PhaserLevel",        /*95*/
+ "DataButtonIncrement",  "DataButtonDecrement", /*97*/
+ "NRP(fine)",        "NRP(coarse)",        /*99*/
+ "RegisteredParameter(fine)", "RegisteredParameter(coarse)", /*101*/
  "unknown",           "unknown",             /*103*/
  "unknown",           "unknown",             /*105*/
  "unknown",           "unknown",             /*107*/
@@ -1576,26 +1265,18 @@ int chan, control, value;
  "unknown",           "unknown",             /*115*/
  "unknown",           "unknown",             /*117*/
  "unknown",           "unknown",             /*119*/
- "All Sound Off",     "All Controllers Off", /*121*/
- "Local Keyboard (on/off)","All Notes Off",  /*123*/
- "Omni Mode Off",     "Omni Mode On",        /*125*/
- "Mono Operation",    "Poly Operation"};
+ "AllSoundOff",     "AllControllersOff", /*121*/
+ "LocalKeyboard(on/off)","AllNotesOff",  /*123*/
+ "OmniModeOff",     "OmniModeOn",        /*125*/
+ "MonoOperation",    "PolyOperation"};
 
 /*  if (onlychan >=0 && chan != onlychan) return; */
   if (prtime(timeunits)) return;
 
+  if (control == 6) bend2cents = 8192.0/(100.0*value); /*[SS] 2022-02-12 */
   printf("CntlParm %2d %s = %d\n",chan+1, ctype[control],value);
 }
 
-void stats_parameter(chan,control,value)
-int chan, control, value;
-{
-/*if (control == 7) {
-  printf("cntrlvolume %d %d \n",chan+1,value);
-  }
-*/
-trkdata.cntlparam[chan+1]++;
-}
 
 void mftxt_metatext(type,leng,mess)
 int type, leng;
@@ -1633,17 +1314,6 @@ char *mess;
 }
 
 
-void stats_metatext(type,leng,mess)
-int type, leng;
-char *mess;
-{
-int i; 
-if (type != 3) return;
-printf("metatext %d ",type);
-for (i=0;i<leng;i++) printf("%c",mess[i]);
-printf("\n");
-}
-
 
 void mftxt_keysig(sf,mi)
 int sf, mi;
@@ -1662,25 +1332,6 @@ int sf, mi;
 }
 
 
-/* [SS] 2018-01-02 */
-void stats_keysig(sf,mi)
-int sf, mi;
-{
-  float beatnumber;
-  static char *major[] = {"Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F",
-    "C", "G", "D", "A", "E", "B", "F#", "C#"};
-  static char *minor[] = {"Abmin", "Ebmin", "Bbmin", "Fmin", "Cmin",
-    "Gmin", "Dmin", "Amin", "Emin", "Bmin", "F#min", "C#min", "G#min"};
-  int index;
-  beatnumber = Mf_currtime/division;
-  index = sf + 7;
-  if (index < 0 || index >12) return;
-  if (mi)
-    printf("keysig %s %d %d %6.2f\n",minor[index],sf,mi,beatnumber);
-  else
-    printf("keysig %s %d %d %6.2f\n",major[index],sf,mi,beatnumber);
-}
-
 
 void mftxt_tempo(ltempo)
 long ltempo;
@@ -1690,17 +1341,6 @@ long ltempo;
   printf("Metatext tempo = %6.2f bpm\n",60000000.0/tempo);
 }
 
-/* [SS] 2018-01-02 */
-void stats_tempo(ltempo)
-long ltempo;
-{
-  float beatnumber;
-  tempo = ltempo;
-  beatnumber = Mf_currtime/division;
-  if (trkdata.tempo[0] == 0) printf("tempo %6.2f bpm\n",60000000.0/tempo);
-  else if (trkdata.tempo[0] < 10) printf("ctempo  %6.2f %6.2f\n",60000000.0/tempo,beatnumber);
-  trkdata.tempo[0]++;
-}
 
 void mftxt_timesig(nn,dd,cc,bb)
 int nn, dd, cc, bb;
@@ -1714,16 +1354,6 @@ int nn, dd, cc, bb;
   32nd-notes/24-MIDI-clocks=%d\n", nn,denom,cc,bb); */
 }
 
-void stats_timesig(nn,dd,cc,bb)
-int nn, dd, cc, bb;
-{
-  float beatnumber;
-  int denom = 1;
-  beatnumber = Mf_currtime/division;
-  while ( dd-- > 0 )
-    denom *= 2;
-  printf("timesig %d/%d %6.2f\n",nn,denom,beatnumber);
-} 
 
 void mftxt_smpte(hr,mn,se,fr,ff)
 int hr, mn, se, fr, ff;
@@ -1774,11 +1404,11 @@ void initfunc_for_mftext()
     Mf_trackend = txt_trackend;
     Mf_noteon = mftxt_noteon;
     Mf_noteoff = mftxt_noteoff;
-    Mf_pressure =mftxt_pressure;
+    Mf_pressure =mftxt_polypressure;
     Mf_parameter = mftxt_parameter;
     Mf_pitchbend = mftxt_pitchbend;
     Mf_program = mftxt_program;
-    Mf_chanpressure = mftxt_pressure;
+    Mf_chanpressure = mftxt_chanpressure;
     Mf_sysex = no_op2;
     Mf_metamisc = no_op3;
     Mf_seqnum = no_op1;
@@ -1792,31 +1422,6 @@ void initfunc_for_mftext()
     Mf_arbitrary = no_op2;
 }
 
-void initfunc_for_stats()
-{
-    Mf_error = stats_error; /* [SS] 2017-11-19 */
-    Mf_header = stats_header;
-    Mf_trackstart = stats_trackstart;
-    Mf_trackend = stats_trackend;
-    Mf_noteon = stats_noteon;
-    Mf_noteoff = stats_noteoff;
-    Mf_pressure = no_op3;
-    Mf_parameter = stats_parameter;
-    Mf_pitchbend = stats_pitchbend;
-    Mf_program = stats_program;
-    Mf_chanpressure = stats_pressure;
-    Mf_sysex = no_op2;
-    Mf_metamisc = no_op3;
-    Mf_seqnum = no_op1;
-    Mf_eot = no_op0;
-    Mf_timesig = stats_timesig;
-    Mf_smpte = no_op5;
-    Mf_tempo = stats_tempo;
-    Mf_keysig = stats_keysig;
-    Mf_seqspecific = no_op3;
-    Mf_text = stats_metatext;
-    Mf_arbitrary = no_op2;
-}
 
 
 
@@ -2737,6 +2342,8 @@ int trackno;
   char ch;
   int type,sf,mi,nn,denom,bb;
 
+  sf = 0; /* [SS] 2021-06-27 */
+
   while (((*textplace) != NULL) && ((*textplace)->when <= t)) {
     str = (*textplace)->text;
     ch = *str;
@@ -3450,7 +3057,8 @@ char *num;
     p = p + 1;
     neg = -1;
   };
-  while (((int)*p >= '0') && ((int)*p <= '9')) {
+  /* [JA] 2021-05-25 */
+  while (((int)*p >= '0') && ((int)*p <= '9') && (t < (INT_MAX-9)/10)) {
     t = t * 10 + (int) *p - '0';
     p = p + 1;
   };
@@ -3466,10 +3074,15 @@ char **p;
   int t;
   
   t = 0;
-  while (((int)**p >= '0') && ((int)**p <= '9')) {
+  /* [JA] 2021-05-25 */
+  while (((int)**p >= '0') && ((int)**p <= '9') && (t < (INT_MAX-9)/10)) {
     t = t * 10 + (int) **p - '0';
     *p = *p + 1;
   };
+  /* advance over any spurious extra digits */
+  while (isdigit(**p)) {
+    *p = *p + 1;
+  }
   return t;
 }
 
@@ -3610,7 +3223,8 @@ int argc;
   arg = getarg("-stats",argc,argv);
   if (arg != -1)
    {
-   stats = 1;
+   printf("\nuse the new application midistats\n");
+   exit(1);
    } 
 
   arg = getarg("-d",argc,argv);
@@ -3823,7 +3437,6 @@ int argc;
     printf("         -mftext mftext output in beats\n"); 
     printf("         -mftextpulses mftext output in midi pulses\n"); 
     printf("         -mftext mftext output in seconds\n"); 
-    printf("         -stats summary and statistics output\n"); 
     printf("         -ver version number\n");
     printf("         -d <number> debug parameter\n");
     printf(" None or only one of the options -aul -gu, -b, -Q -u should\n");
@@ -4072,17 +3685,6 @@ mfread();
 }
 
 
-void midistats(argc,argv)
-char *argv[];
-int argc;
-{
-initfunc_for_stats();
-Mf_getc = filegetc;
-mfread();
-stats_finish();
-}
-
-
 
 int main(argc,argv)
 char *argv[];
@@ -4094,7 +3696,6 @@ int argc;
   arg = process_command_line_arguments(argc,argv);
   if(midiprint ==1) { midigram(argc,argv);
   } else if(midiprint ==2)  { mftext(argc,argv);
-  } else if(stats == 1) { midistats(argc,argv);
   } else midi2abc(argc,argv); 
   return 0;
 }

@@ -32,10 +32,12 @@
 #define TAB 9
 #include "abc.h"
 #include "parseabc.h"
+#include "music_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 /* [JM] 2018-02-22 to handle strncasecmp() */
 #include <string.h>
+#include <limits.h>
 
 /* #define SIZE_ABBREVIATIONS ('Z' - 'H' + 1) [SS] 2016-09-20 */
 #define SIZE_ABBREVIATIONS 58
@@ -50,6 +52,7 @@
 #ifdef _MSC_VER
 #define ANSILIBS
 #define casecmp stricmp
+#define strcasecmp _stricmp
 #define _CRT_SECURE_NO_WARNINGS
 #else
 #define casecmp strcasecmp
@@ -79,6 +82,7 @@ extern char *malloc ();
 extern char *strchr ();
 #endif
 
+int note2midi (char** s); 
 int lineno;
 int parsing_started = 0;
 int parsing, slur;
@@ -90,10 +94,16 @@ int chorddecorators[DECSIZE];
 char decorations[] = ".MLRH~Tuv'OPS"; /* 2020-05-01 */
 char *abbreviation[SIZE_ABBREVIATIONS];
 
-int voicecodes = 0;
-/* [SS] 2015-03-16 allow 24 voices */
-/*char voicecode[16][30];       for interpreting V: string */
-char voicecode[24][30];		/*for interpreting V: string */
+int num_voices = 0;  /* [JA] 2020-10-12 */
+int repcheck = 1; /* enables/ disables repeat checking */
+/* abc2midi disables repeat checking because it does its own thing */
+voice_context_t voicecode[MAX_VOICES];
+timesig_details_t master_timesig;  /* [JA] 2020-12-10 */
+cleftype_t master_clef;
+int has_timesig;
+int master_unitlen; /* L: field value is 1/unitlen */
+int voicenum; /* current voice number */
+int has_voice_fields = 0;
 
 int decorators_passback[DECSIZE];
 /* this global array is linked as an external to store.c and 
@@ -121,13 +131,7 @@ int oldchordconvention = 0;
 char * abcversion = "2.0"; /* [SS] 2014-08-11 */
 char lastfieldcmd = ' '; /* [SS] 2014-08-15 */
 
-char *mode[10] = { "maj", "min", "m",
-  "aeo", "loc", "ion", "dor", "phr", "lyd", "mix"
-};
-
-int modeshift[10] = { 0, -3, -3,
-  -3, -5, 0, -2, -4, 1, -1
-};
+/* tables mode and modeshift moved to music_utils.c */
 
 int modeminor[10] = { 0, 1, 1,
   1, 0, 0, 0, 0, 0, 0
@@ -169,7 +173,11 @@ char * concatenatestring(s1,s2)
 { 
    int len = strlen(s1) + strlen(s2) + 1;
    char *p = (char *) checkmalloc(len);
+#ifdef NO_SNPRINTF
+   sprintf(p, "%s%s",s1,s2); /* [SS] 2020-11-01 */
+#else
    snprintf(p,len, "%s%s",s1,s2);
+#endif
   return p;
 }
 
@@ -329,30 +337,6 @@ skiptospace (p)
     *p = *p + 1;
 }
 
-
-int
-isnumberp (p)
-     char **p;
-/* returns 1 if positive number, returns 0 if not a positive number */
-/* ie -4 or 1A both return 0. This function is needed to get the    */
-/* voice number.                                                    */
-{
-  char **c;
-  c = p;
-  while (( **c != ' ') && ( **c != TAB) &&  **c != '\0')
-    {
-      if (( **c >= 0) &&  (**c <= 9)) /*[SDG] 2020-06-03 */
-	*c = *c + 1;
-      else
-	return 0;
-    }
-  return 1;
-/* could use isdigit(**c) */
-/* is zero a positive number? is V:0 ok? [SS] */
-}
-
-
-
 int
 readnumf (num)
      char *num;
@@ -367,11 +351,15 @@ readnumf (num)
       event_error ("Missing Number");
     };
   t = 0;
-  while (((int) *p >= '0') && ((int) *p <= '9'))
+/* [JA] 2021-05-25 */
+  while (((int) *p >= '0') && ((int) *p <= '9') && (t < (INT_MAX-9)/10))
     {
       t = t * 10 + (int) *p - '0';
       p = p + 1;
     };
+  if (t >= (INT_MAX-9)/10) {  /* [JA] 2021-05-25 */
+    event_error ("Number too big");
+  }
   return (t);
 }
 
@@ -403,11 +391,16 @@ readnump (p)
   int t;
 
   t = 0;
-  while (((int) **p >= '0') && ((int) **p <= '9'))
-    {
-      t = t * 10 + (int) **p - '0';
-      *p = *p + 1;
-    };
+  /* [JA] 2021-05-25 */
+  while (((int) **p >= '0') && ((int) **p <= '9') && (t < (INT_MAX-9)/10))
+  {
+    t = t * 10 + (int) **p - '0';
+    *p = *p + 1;
+  }
+  /* advance over any spurious extra digits [JA] 2021-05-25 */
+  while (isdigit(**p)) {
+    *p = *p + 1;
+  }
   return (t);
 }
 
@@ -428,111 +421,194 @@ readsnump (p)
     }
 }
 
-void
-readsig (a, b, sig)
-     int *a, *b;
-     char **sig;
-/* read time signature (meter) from M: field */
+/* [JA] 2020-12-10 */
+int check_power_of_two(int denom)
 {
   int t;
-  char c; /* [SS] 2015-08-19 */
+  char error_message[80];
 
-  /* [SS] 2012-08-08  cut time (C| or c|) is 2/2 not 4/4 */
-  if ((*(*sig + 1) == '|') && ((**sig == 'C') || (**sig == 'c')))
-    {
-      *a = 2;
-      *b = 2;
-      return;
+  t = denom; 
+  while (t > 1) {
+    if (t % 2 != 0) {
+      snprintf(error_message, 80, "%d b is not a power of 2", denom);
+      event_error (error_message);
+      return -1;
+    } else {
+      t = t / 2;
     }
+  }
+  return denom;
+}
+/* [JA] 2020-12-10 */
+/* read the numerator of a time signature in M: field
+ *
+ * abc standard 2.2 allows M:(a + b + c + ...)/d
+ * This indicates how note lenths within a bar are to be grouped.
+ * abc standard also allows a+b+c/d to mean the same thing but this 
+ * goes against the convention that division takes precendence
+ * over addition i.e. a+b+c/d normally means a + b + (c/d).
+ */
+static int read_complex_has_timesig(char **place, timesig_details_t *timesig)
+{
+  int n;
+  int total;
+  int count;
+  int has_bracket = 0;
 
-  if ((**sig == 'C') || (**sig == 'c'))
-    {
-      *a = 4;
-      *b = 4;
-      return;
-    };
-  *a = readnump (sig);
-
-  /* [SS] 2015-08-19 */
-  while ((int) **sig == '+') {
-    *sig = *sig + 1;
-    c = readnump (sig);
-    *a = *a + c;
+  if (**place == '(') {
+    *place = *place + 1;
+    has_bracket = 1;
+    skipspace(place);
+  }
+  count = 0;
+  total = 0;
+  skipspace(place);
+  while ((**place != '\0') && (isdigit(**place))) {
+    n = readnump(place);
+    timesig->complex_values[count] = n;
+    total = total + n;
+    count = count + 1;
+    if (count > 8) {
+      event_error("Too many parts to complex time (maximum 8)");
+      return 0;
     }
-
-  if ((int) **sig != '/')
-    {
-      event_error ("Missing / ");
+    skipspace(place);
+    if (**place == '+') {
+      *place = *place + 1;
+      skipspace(place);
     }
-  else
-    {
-      *sig = *sig + 1;
-    };
-  *b = readnump (sig);
-  if ((*a == 0) || (*b == 0))
-    {
-      event_error ("Expecting fraction in form A/B");
+  }
+  if (**place == ')') {
+    *place = *place + 1; /* advance over ')' */
+    skipspace(place);
+    if (!has_bracket) {
+      event_warning("Missing ( in complex time");
     }
-  else
-    {
-      t = *b;
-      while (t > 1)
-	{
-	  if (t % 2 != 0)
-	    {
-	      event_error ("divisor must be a power of 2");
-	      t = 1;
-	      *b = 0;
-	    }
-	  else
-	    {
-	      t = t / 2;
-	    };
-	};
-    };
+    has_bracket = 0;
+  }
+  if (has_bracket) {
+    event_warning("Missing ) in complex time");
+  }
+  /* we have reached the end of the numerator */
+  timesig->num_values = count;
+  timesig->num = total;
+  if (timesig->num_values == 1)
+  {
+    timesig->type = TIMESIG_NORMAL;
+  } else {
+    timesig->type = TIMESIG_COMPLEX;
+  }
+  return 1;
 }
 
-void
-readlen (a, b, p)
-     int *a, *b;
-     char **p;
+/* read time signature (meter) from M: field */
+void readsig (char **sig, timesig_details_t *timesig)
+/* upgraded [JA] 2020-12-10 */
+{
+  int valid_num;
+
+  if ((strncmp (*sig, "none", 4) == 0) ||
+      (strncmp (*sig, "None", 4) == 0)) {
+    timesig->num = 4;
+    timesig->denom = 4;
+    timesig->type = TIMESIG_FREE_METER;
+    return;
+  }
+  /* [SS] 2012-08-08  cut time (C| or c|) is 2/2 not 4/4 */
+  if (((**sig == 'C') || (**sig == 'c')) &&
+      (*(*sig + 1) == '|')) {
+    timesig->num = 2;
+    timesig->denom = 2;
+    timesig->type = TIMESIG_CUT;
+    return;
+  }
+  if ((**sig == 'C') || (**sig == 'c')) {
+    timesig->num = 4;
+    timesig->denom = 4;
+    timesig->type = TIMESIG_COMMON;
+    return;
+  }
+  valid_num = read_complex_has_timesig(sig, timesig);
+  if (!valid_num) {
+    /* An error message will have been generated by read_complex_has_timesig */
+    timesig->num = 4;
+    timesig->denom = 4;
+    timesig->type = TIMESIG_FREE_METER;
+    return;
+  }
+
+  if ((int)**sig != '/') {
+    event_warning ("No / found, assuming denominator of 1");
+    timesig->denom = 1;
+  } else {
+    *sig = *sig + 1;
+    skipspace(sig);
+    if (!isdigit(**sig)) {
+      event_warning ("Number not found for M: denominator");
+    }
+    timesig->denom = readnump (sig);
+  }
+  if ((timesig->num == 0) || (timesig->denom == 0)) {
+    event_error ("Expecting fraction in form A/B");
+  } else {
+    timesig->denom =  check_power_of_two(timesig->denom);
+  }
+}
+
+
+void readlen (int *a, int *b, char **p)
 /* read length part of a note and advance character pointer */
 {
   int t;
 
   *a = readnump (p);
-  if (*a == 0)
-    {
-      *a = 1;
-    };
+  if (*a == 0) {
+    *a = 1;
+  }
   *b = 1;
-  if (**p == '/')
-    {
-      *p = *p + 1;
-      *b = readnump (p);
-      if (*b == 0)
-	{
-	  *b = 2;
-	  while (**p == '/')
-	    {
-	      *b = *b * 2;
-	      *p = *p + 1;
-	    };
-	};
-    };
-  t = *b;
-  while (t > 1)
-    {
-      if (t % 2 != 0)
-	{
-	  event_warning ("divisor not a power of 2");
-	  t = 1;
-	}
-      else
-	{
-	  t = t / 2;
-	};
-    };
+  if (**p == '/') {
+    *p = *p + 1;
+    *b = readnump (p);
+    if (*b == 0) {
+      *b = 2;
+      /* [JA] 2021-05-19 prevent infinite loop */
+      /* limit the number of '/'s we support */
+      while ((**p == '/') && (*b < 1024)) {
+        *b = *b * 2;
+        *p = *p + 1;
+      }
+      if (*b >= 1024) {
+        event_warning ("Exceeded maximum note denominator");
+      }
+    }
+  }
+  *b = check_power_of_two(*b);
+}
+
+
+/* [JA] 2020-12-10 */
+static void read_L_unitlen(int *num, int *denom, char **place)
+{
+  if (!isdigit(**place)) {
+    event_warning("No digit at the start of L: field");
+  }
+  *num = readnump (place);
+  if (*num == 0) {
+    *num = 1;
+  }
+  if ((int)**place != '/') {
+    event_error ("Missing / ");
+    *denom = 1;
+  } else {
+    *place = *place + 1;
+    skipspace(place);
+    *denom = readnump (place);
+  }
+  if ((*num == 0) || (*denom == 0)) {
+    event_error ("Expecting fraction in form A/B");
+  } else {
+    *denom =  check_power_of_two(*denom);
+  }
 }
 
 void
@@ -602,142 +678,38 @@ ismicrotone (p, dir)
   return 0;
 }
 
-
-
-
-int
-isclef (s, gotoctave, octave, strict)
-     char *s;
-     int *gotoctave, *octave;
-     int strict;
 /* part of K: parsing - looks for a clef in K: field                 */
 /* format is K:string where string is treble, bass, baritone, tenor, */
 /* alto, mezzo, soprano or K:clef=arbitrary                          */
+/* revised by James Allwright  [JA] 2020-10-18 */
+int isclef (char *s, cleftype_t * new_clef,
+            int *gotoctave, int *octave, int expect_clef)
 {
   int gotclef;
-  s = s;
+
   gotclef = 0;
-  if (strncmp (s, "bass", 4) == 0)
-    {
-      gotclef = 1;
-      *octave = 0; /* [SS] 2020-05-06 */
-    };
-  if (strncmp (s, "treble", 6) == 0)
-    {
-      gotclef = 1;
-      /* [SS] 2020-05-06 */
-      /*if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)*/
-      if (fileprogram == ABC2MIDI)
-        {
-        /* [SS] 2015-07-02  2019-01-20*/
-	/* event_warning ("clef= is overriding octave= setting"); */
-        *gotoctave = 1;		/* [SS] 2011-12-19 */
-        *octave = 0; /* [SS] 2020-05-06 */
-        }
-    };
-  if (strncmp (s, "treble+8", 8) == 0)
-    {
-      gotclef = 1;
-      /* [SS] 2020-05-06 */
-      /*if (fileprogram == ABC2MIDI && *gotoctave != 1 && *octave != 1)*/
-      if (fileprogram == ABC2MIDI)
-        {
-	/* event_warning ("clef= is overriding octave= setting"); */
-        /* [SS] 2015-07-02 2019-01-20 */
-        *gotoctave = 1;
-        *octave = 1;
-        }
-    };
-  if (strncmp (s, "treble-8", 8) == 0)
-    {
-      gotclef = 1;
-      /* [SS] 2020-05-06 */
-      /*if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1)*/
-      if (fileprogram == ABC2MIDI)
-        {
-	/* event_warning ("clef= is overriding octave= setting"); */
-        *gotoctave = 1;
-        *octave = -1;
-        }
-    };
-  if (strncmp (s, "baritone", 8) == 0)
-    {
-      gotclef = 1;
-      *octave = 0; /* [SS] 2020-05-06 */
-    };
-  if (strncmp (s, "tenor", 5) == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    };
-  if (strncmp (s, "tenor-8", 7) == 0)
-    {
-      gotclef = 1;
-      /* [SS] 2020-05-06 */
-      /*if (fileprogram == ABC2MIDI && *gotoctave == 1 && *octave != -1) {*/
-      if (fileprogram == ABC2MIDI) {
-	/*event_warning ("clef= is overriding octave= setting");*/
-        *gotoctave = 1;
-        *octave = -1;
-        }
-    };
-  if (strncmp (s, "alto", 4) == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    };
-  if (strncmp (s, "mezzo", 5) == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    };
-  if (strncmp (s, "soprano", 7) == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    };
-/*
- * only clef=F or clef=f is allowed, or else
- * we get a conflict with the key signature
- * indication K:F
-*/
-
-  if (strncmp (s, "f", 1) == 0 && strict == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
+  new_clef->octave_offset = 0;
+  gotclef = get_standard_clef (s, new_clef);
+  if (!gotclef && expect_clef) {
+    /* do we have a clef in letter format ? e.g. C1, F3, G3 */
+    gotclef = get_extended_clef_details (s, new_clef);
+    if (new_clef->basic_clef == basic_clef_none) {
+      event_warning ("Found clef=none, but a clef is required. Ignoring");
+      gotclef = 0;
     }
-  if (strncmp (s, "F", 1) == 0 && strict == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    }
-  if (strncmp (s, "g", 1) == 0 && strict == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    }
-  if (strncmp (s, "G", 1) == 0 && strict == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    }
-  if (strncmp (s, "perc", 1) == 0 && strict == 0)
-    {
-      gotclef = 1;
-      *octave=0;  /* [SS] 2020-05-06 */
-    }				/* [SS] 2011-04-17 */
-
-  if (!strict && !gotclef)
-    {
-      gotclef = 1;
-      event_warning ("cannot recognize clef indication");
-    }
-
+  }
+  if (expect_clef && !gotclef) {
+    char error_message[80];
+    
+#ifdef NO_SNPRINTF
+    sprintf (error_message, "clef %s not recognized", s);
+#else
+    snprintf (error_message, 80, "clef %s not recognized", s);
+#endif
+    event_warning (error_message);
+  } 
   return (gotclef);
 }
-
-
 
 char *
 readword (word, s)
@@ -788,76 +760,189 @@ lcase (s)
     };
 }
 
+/* initialize a timesig structure to default values */
+void init_timesig(timesig_details_t *timesig)
+{
+  timesig->type = TIMESIG_FREE_METER;
+  timesig->num = 4;
+  timesig->denom = 4;
+  timesig->complex_values[0] = 4;
+  timesig->num_values = 1;
+}
 
-void
-init_voicecode ()
+/* [JA] 2020-10-12 */
+void init_voice_contexts (void)
 {
   int i;
-  for (i = 0; i < 24; i++) /* [SS} 2015-03-15 */
-    voicecode[i][0] = 0;
-  voicecodes = 0;
+  cleftype_t default_clef;  /* [JA] 2020-11-01 */
+
+  /* we use treble clef when no clef is explicitly specified */
+  get_standard_clef ("treble", &default_clef); /* default to treble clef */
+  for (i = 0; i < MAX_VOICES; i++) {      /* [SS} 2015-03-15 */
+    voicecode[i].label[0] = '\0';
+    voicecode[i].expect_repeat = 0;
+    voicecode[i].repeat_count = 0;
+    copy_clef(&voicecode[i].clef, &default_clef); /* [JA] 2020-11-01 */
+  }
 }
+
+/* copy one timesig_details_t struct to another  [JA] 2020-12-10 */
+void copy_timesig(timesig_details_t *destination, timesig_details_t *source)
+{
+  int i;
+
+  destination->type = source->type;
+  destination->num = source->num;
+  destination->denom = source->denom;
+  for (i = 0; i < 8; i++)
+  {
+    destination->complex_values[i] = source->complex_values[i];
+  }
+  destination->num_values = source->num_values;
+}
+
+/* [JA] 2020-10-12 */
+/* called at the start of each tune */
+static void reset_parser_status (void)
+{
+  cleftype_t default_clef;
+
+  init_timesig(&master_timesig);
+  get_standard_clef ("treble", &master_clef); /* default to treble clef */
+  has_timesig = 0;
+  master_unitlen = -1;
+  voicenum = 1;
+  has_voice_fields = 0;
+  num_voices = 1;
+  parserinchord = 0;
+  ingrace = 0;
+  slur = 0;
+  init_voice_contexts ();
+}
+
 
 void
 print_voicecodes ()
 {
   int i;
-  if (voicecodes == 0)
+  if (num_voices == 0)
     return;
   printf ("voice mapping:\n");
-  for (i = 0; i < voicecodes; i++)
+  for (i = 0; i < num_voices; i++)
     {
       if (i % 4 == 3)
 	printf ("\n");
-      printf ("%s  %d   ", voicecode[i], i + 1);
+      printf ("%s  %d   ", voicecode[i].label, i + 1);
     }
   printf ("\n");
 }
 
-int
-interpret_voicestring (char *s)
-{
-/* if V: is followed  by a string instead of a number
- * we check to see if we have encountered this string
- * before. We assign the number associated with this
- * string and add it to voicecode if it was not encountered
- * before. If more than 16 distinct strings were encountered
- * we report an error -1.
+/* [JA] 2020-10-12 */
+int interpret_voice_label (char *s, int num, int *is_new)
+/* We expect a numeric value indicating the voice number.
+ * The assumption is that these will ocuur in the order in which voices
+ * appear, so that we have V:1, V:2, ... V:N if there are N voices.
+ * The abc standard 2.2 allows strings instead of these numbers to
+ * represent voices.
+ * This function should be called with either
+ * an empty string and a valid num or
+ * a valid string and num set to 0.
+ *
+ * If num is non-zero, we check that it is valid and return it.
+ * If the number is one above the number of voices currently in use,
+ * we allocate a new voice.
+ *
+ * If num is zero and the string is not empty, we check if string
+ * has been assigned to one of the existing voices. If not, we
+ * allocate a new voice and assign the string to it.
+ *
+ * If we exceed MAX_VOICES voices, we report an error.
+ *
+ * we return a voice number in the range 1 - num_voices
 */
+{
   int i;
   char code[32];
-  char msg[80];			/* [PHDM] 2012-11-22 */
+  char msg[80];                 /* [PHDM] 2012-11-22 */
   char *c;
   c = readword (code, s);
 
-/* [PHDM] 2012-11-22 */
-  if (*c != '\0' && *c != ' ' && *c != ']')
+  if (num > 0)
+  {
+    if (num > num_voices + 1)
     {
-      sprintf (msg, "invalid character `%c' in Voice ID", *c);
-      event_error (msg);
+      char error_message[80];
+
+#ifdef NO_SNPRINT 
+      sprintf(error_message, "V:%d out of sequence, treating as V:%d",
+               num, num_voices); /* [SS] 2020-10-01 */
+#else
+      snprintf(error_message, 80, "V:%d out of sequence, treating as V:%d",
+               num, num_voices);
+#endif
+      event_warning(error_message);
+      num = num_voices + 1;
     }
+    /* declaring a new voice */
+    if (num == num_voices + 1)
+    {
+      *is_new = 1;
+      if (num_voices >= MAX_VOICES)
+      {
+        event_warning("Number of available voices exceeded");
+        return 1;
+      }
+      num_voices = num_voices + 1;
+      voicecode[num_voices - 1].label[0] = '\0';
+    } else {
+      /* we are using a previously declared voice */
+      *is_new = 0;
+    }
+    return num;
+  }
+/* [PHDM] 2012-11-22 */
+  if (*c != '\0' && *c != ' ' && *c != ']') {
+    sprintf (msg, "invalid character `%c' in Voice ID", *c);
+    event_error (msg);
+  }
 /* [PHDM] 2012-11-22 */
 
   if (code[0] == '\0')
-    return 0;
-  if (voicecodes == 0)
-    {
-      strcpy (voicecode[voicecodes], code);
-      voicecodes++;
-      return voicecodes;
+  {
+    event_warning("Empty V: field, treating as V:1");
+    return 1;
+  }
+  /* Has supplied label been used for one of the existing voices ? */
+  if (has_voice_fields)
+  {
+    for (i = 0; i < num_voices; i++) {
+      if (strcmp (code, voicecode[i].label) == 0) {
+        return i + 1;
+      }
     }
-  for (i = 0; i < voicecodes; i++)
-    if (stringcmp (code, voicecode[i]) == 0)
-      return (i + 1);
-  if ((voicecodes + 1) > 23) /* [SS] 2015-03-16 */
-    return -1;
-  strcpy (voicecode[voicecodes], code);
-  voicecodes++;
-  return voicecodes;
+  }
+  /* if we have got here, we have a new voice */
+  if ((num_voices + 1) > MAX_VOICES) {/* [SS] 2015-03-16 */
+    event_warning("Number of available voices exceeded");
+    return 1;
+  }
+  /* First V: field is a special case. We are already on voice 1,
+   * so we don't increment the number of voices, but we will set
+   * status->has_voice_fields on returning from this function.
+   */
+  if (has_voice_fields)
+  {
+    *is_new = 1;
+    num_voices++;
+  } else {
+    *is_new = 0; /* we have already started as voice 1 */
+  }
+  strncpy (voicecode[num_voices - 1].label, code, 31);
+  return num_voices;
 }
 
-/* The following three functions parseclefs, parsetranspose,
- * parseoctave are used to parse the K: field which not
+/* The following four functions parseclefs, parsetranspose,
+ * parsesound, parseoctave are used to parse the K: field which not
  * only specifies the key signature but also other descriptors
  * used for producing a midi file or postscript file.
  *
@@ -867,12 +952,14 @@ interpret_voicestring (char *s)
  * s is advanced to point to the next token.
  */
 
+
 int
-parseclef (s, word, gotclef, clefstr, gotoctave, octave)
+parseclef (s, word, gotclef, clefstr, newclef, gotoctave, octave)
      char **s;
      char *word;
      int *gotclef;
-     char *clefstr;
+     char *clefstr;  /* [JA] 2020-10-19 */
+     cleftype_t * newclef;
      int *gotoctave, *octave;
 /* extracts string clef= something */
 {
@@ -892,14 +979,14 @@ parseclef (s, word, gotclef, clefstr, gotoctave, octave)
 	  *s = *s + 1;
 	  skipspace (s);
 	  *s = readword (clefstr, *s);
-	  if (isclef (clefstr, gotoctave, octave, 0))
+	  if (isclef (clefstr, newclef, gotoctave, octave, 1))
 	    {
 	      *gotclef = 1;
 	    };
 	};
       successful = 1;
     }
-  else if (isclef (word, gotoctave, octave, 1))
+  else if (isclef (word, newclef, gotoctave, octave, 0))
     {
       *gotclef = 1;
       strcpy (clefstr, word);
@@ -934,6 +1021,49 @@ parsetranspose (s, word, gottranspose, transpose)
   return 1;
 };
 
+/* [SS] 2021-10-11 */
+int
+parsesound (s, word, gottranspose, transpose)
+/* parses string sound = 
+                 shift =
+                 instrument = note1note2 or note1/note2
+  for parsekey() or parsevoice()
+  and returns the transpose value
+*/
+     char **s;
+     char *word;
+     int *gottranspose;
+     int *transpose;
+  {   
+  int p1,p2;
+  if (casecmp(word,"sound") != 0
+     && casecmp(word,"shift") != 0
+     && casecmp(word,"instrument") != 0
+     )
+    return 0;
+  skipspace (s);
+  if (**s != '=')
+    {
+      event_error ("sound must be followed by '='");
+     return 0;
+     } else {
+      *s = *s + 1;
+      skipspace (s);
+      p1 = note2midi (s);
+      /* printf("midi note = %d\n",p1); */
+      p2 = note2midi (s);
+      if (p2 == p1) {
+          *gottranspose = 0;
+          *transpose = 0;
+          } else {
+          /* printf("midi note = %d\n",p2); */
+          *transpose = p2 - p1; /* [SS] 2022.02.18 2022.04.27 */
+          /* printf("transpose = %d\n",*transpose); */
+          *gottranspose = 1;
+          }
+     }
+  return 1;
+  }
 
 int
 parseoctave (s, word, gotoctave, octave)
@@ -960,114 +1090,96 @@ parseoctave (s, word, gotoctave, octave)
   return 1;
 };
 
+/* Function added JA 20 May 2022*/
+/* parse a string contained in quotes.
+ * strings may contain the close quote character because
+ * x umlaut is encoded as \"x, which complicates parsing.
+ * this is an unfortunate feature of the abc syntax.
+ *
+ * on entry, start points to the opening double quote.
+ * returns pointer to last character before closing quote.
+ */
+char *umlaut_get_buffer(char *start, char *buffer, int bufferlen)
+{
+  char *p;
+  int last_ch;
+  int i;
 
+  p = start;
+  i = 0;
+  while ((*p != '\0') &&
+         !((*p == '"') && (last_ch != '\\'))) {
+    if (i < bufferlen - 2) {
+      buffer[i] = *p;
+      i = i + 1;
+    }
+    last_ch = *p;
+    p = p + 1;
+  }
+  buffer[i] = '\0';
+  return p;
+}
+
+/* Function added JA 20 May 2022*/
+/* construct string using vstring */
+char *umlaut_build_string(char *start, struct vstring *gchord)
+{
+  int lastch = ' ';
+  char *p;
+
+  p = start;
+  //initvstring (&gchord);
+  /* need to allow umlaut sequence in guitar chords.
+   * e.g. \"a, \"u
+   */
+  while (!((*p == '\0') ||
+          ((*p == '"') && (lastch != '\\')))) {
+    addch (*p, gchord);
+    lastch = *p;
+    p = p + 1;
+  }
+  //printf("umlaut_build_string has >%s<\n", gchord->st);
+  return p;
+}
+
+/* Function modified JA 20 May 2022 */
 int
-parsename (s, word, gotname, namestring, maxsize)
+parsename (s, gotname, namestring, maxsize)
 /* parses string name= "string" in V: command 
    for compatability of abc2abc with abcm2ps
 */
      char **s;
-     char *word;
      int *gotname;
      char namestring[];
      int maxsize;
 {
   int i;
-  i = 0;
-  if (casecmp (word, "name") != 0)
-    return 0;
-  skipspace (s);
-  if (**s != '=')
-    {
-      event_error ("name must be followed by '='");
-    }
-  else
-    {
-      *s = *s + 1;
-      skipspace (s);
-      if (**s == '"')		/* string enclosed in double quotes */
-	{
-	  namestring[i] = (char) **s;
-	  *s = *s + 1;
-	  i++;
-	  while (i < maxsize && **s != '"' && **s != '\0')
-	    {
-	      namestring[i] = (char) **s;
-	      *s = *s + 1;
-	      i++;
-	    }
-	  namestring[i] = (char) **s;	/* copy double quotes */
-	  i++;
-	  namestring[i] = '\0';
-	}
-      else			/* string not enclosed in double quotes */
-	{
-	  while (i < maxsize && **s != ' ' && **s != '\0')
-	    {
-	      namestring[i] = (char) **s;
-	      *s = *s + 1;
-	      i++;
-	    }
-	  namestring[i] = '\0';
-	}
-      *gotname = 1;
-    }
-  return 1;
-};
 
-int
-parsesname (s, word, gotname, namestring, maxsize)
-/* parses string name= "string" in V: command 
-   for compatability of abc2abc with abcm2ps
-*/
-     char **s;
-     char *word;
-     int *gotname;
-     char namestring[];
-     int maxsize;
-{
-  int i;
   i = 0;
-  if (casecmp (word, "sname") != 0)
-    return 0;
   skipspace (s);
-  if (**s != '=')
-    {
-      event_error ("name must be followed by '='");
-    }
-  else
-    {
+  if (**s != '=') {
+    event_error ("name must be followed by '='");
+  } else {
+    *s = *s + 1;
+    skipspace (s);
+    if (**s == '"') {           /* string enclosed in double quotes */
+      namestring[i] = (char)**s;
       *s = *s + 1;
-      skipspace (s);
-      if (**s == '"')		/* string enclosed in double quotes */
-	{
-	  namestring[i] = (char) **s;
-	  *s = *s + 1;
-	  i++;
-	  while (i < maxsize && **s != '"' && **s != '\0')
-	    {
-	      namestring[i] = (char) **s;
-	      *s = *s + 1;
-	      i++;
-	    }
-	  namestring[i] = (char) **s;	/* copy double quotes */
-	  i++;
-	  namestring[i] = '\0';
-	}
-      else			/* string not enclosed in double quotes */
-	{
-	  while (i < maxsize && **s != ' ' && **s != '\0')
-	    {
-	      namestring[i] = (char) **s;
-	      *s = *s + 1;
-	      i++;
-	    }
-	  namestring[i] = '\0';
-	}
-      *gotname = 1;
+      *s = umlaut_get_buffer(*s, &namestring[1], maxsize-1);
+      *s = *s + 1; /* skip over closing double quote */
+      strcat(namestring, "\"");
+    } else {                    /* string not enclosed in double quotes */
+      while (i < maxsize && **s != ' ' && **s != '\0') {
+        namestring[i] = (char)**s;
+        *s = *s + 1;
+        i++;
+      }
+      namestring[i] = '\0';
     }
+    *gotname = 1;
+  }
   return 1;
-};
+}
 
 int
 parsemiddle (s, word, gotmiddle, middlestring, maxsize)
@@ -1133,6 +1245,71 @@ parseother (s, word, gotother, other, maxsize)	/* [SS] 2011-04-18 */
   return 0;
 }
 
+
+static void process_microtones (int *parsed,  char word[],
+  char modmap[], int modmul[], struct fraction modmicrotone[])
+{
+  int a, b;                     /* for microtones [SS] 2014-01-06 */
+  char c;
+  int j;
+  int success;
+
+  /* shortcuts such as ^/4G instead of ^1/4G not allowed here */
+
+	  success = sscanf (&word[1], "%d/%d%c", &a, &b, &c);
+	  if (success == 3) /* [SS] 2016-04-10 */
+	    {
+	      *parsed = 1;
+	      j = (int) c - 'A';
+        if (j > 7) {
+          j = (int) c - 'a';
+        }
+        if (j > 7 || j < 0) {
+          event_error ("Not a valid microtone");
+          return;
+        }
+	      if (word[0] == '_') a = -a;
+	      /* printf("%s fraction microtone  %d/%d for %c\n",word,a,b,c); */
+	   } else {
+	    success = sscanf (&word[1], "%d%c", &a, &c); /* [SS] 2020-06-25 */
+            if (success == 2)
+	    {
+            b = 0;
+            /* printf("%s integer microtone %d%c\n",word,a,c); */
+	    if (temperament != 1) { /* [SS] 2020-06-25 2020-07-05 */
+		    event_warning("do not use integer microtone without calling %%MIDI temperamentequal");
+	            }
+	    *parsed = 1;
+	    }
+          }
+	  /* if (parsed ==1)  [SS] 2020-09-30 */
+    if (success > 0) {
+      j = (int) c - 'A';
+      if (j > 7) {
+        j = (int) c - 'a';
+      }
+      if (j > 7 || j < 0) {
+        event_error ("Not a valid microtone");
+        return;
+      }
+      if (word[0] == '_') a = -a;
+      modmap[j] = word[0];
+	    modmicrotone[j].num = a;
+	    modmicrotone[j].denom = b;
+	    /* printf("%c microtone = %d/%d\n",modmap[j],modmicrotone[j].num,modmicrotone[j].denom); */
+	  }
+} /* finished ^ = _ */
+
+static void set_voice_from_master(int voice_num)
+{
+  voice_context_t *current_voice;
+
+  current_voice = &voicecode[voice_num - 1];
+  copy_timesig(&current_voice->timesig, &master_timesig);
+  copy_clef(&current_voice->clef, &master_clef);
+  current_voice->unitlen = master_unitlen;
+}
+
 int
 parsekey (str)
 /* parse contents of K: field */
@@ -1172,6 +1349,7 @@ parsekey (str)
   int foundmode;
   int transpose, octave;
   char clefstr[30];
+  cleftype_t newclef;
   char modestr[30];
   char msg[80];
   char *moveon;
@@ -1198,6 +1376,7 @@ parsekey (str)
   gotclef = 0;
   cgotoctave = 0;
   coctave = 0;
+  init_new_clef (&newclef);
   modeindex = 0;
   explict = 0;
   modnotes = 0;
@@ -1212,7 +1391,16 @@ parsekey (str)
   word[0] = 0; /* in case of empty string [SDG] 2020-06-04 */
   while (*s != '\0')
     {
-      parsed = parseclef (&s, word, &gotclef, clefstr, &cgotoctave, &coctave);
+      parsed = parseclef (&s, word, &gotclef, clefstr, &newclef, &cgotoctave, &coctave);
+      if (parsed) {  /* [JA] 2021-05-21 changed (gotclef) to (parsed) */
+        /* make clef an attribute of current voice */
+        if (inhead) {
+          copy_clef (&master_clef, &newclef);
+        }
+        if (inbody){
+          copy_clef (&voicecode[voicenum - 1].clef, &newclef);
+        }
+      }
       /* parseclef also scans the s string using readword(), placing */
       /* the next token  into the char array word[].                   */
       if (!parsed)
@@ -1220,6 +1408,9 @@ parsekey (str)
 
       if (!parsed)
 	parsed = parseoctave (&s, word, &gotoctave, &octave);
+
+      if (!parsed)
+        parsed = parsesound (&s, word, &gottranspose, &transpose);
 
       if ((parsed == 0) && (casecmp (word, "Hp") == 0))
 	{
@@ -1379,42 +1570,14 @@ parsekey (str)
 	      modmul[j] = 2;
 	      parsed = 1;
 	    };
+   }
 	  /* microtone? */
 	  /* shortcuts such as ^/4G instead of ^1/4G not allowed here */
-	  parsed =0;
-	  success = sscanf (&word[1], "%d/%d%c", &a, &b, &c);
-	  if (success == 3) /* [SS] 2016-04-10 */
-	    {
-	      parsed = 1;
-	      j = (int) c - 'A';
-              if (j > 7) j = (int) c - 'a';
-              if (j > 7 || j < 0) {printf("invalid j = %d\n",j); exit(-1);}
-	      if (word[0] == '_') a = -a;
-	      /* printf("%s fraction microtone  %d/%d for %c\n",word,a,b,c); */
-	   } else {
-	    success = sscanf (&word[1], "%d%c", &a, &c); /* [SS] 2020-06-25 */
-            if (success == 2)
-	    {
-            b = 0;
-            /* printf("%s integer microtone %d%c\n",word,a,c); */
-	    if (temperament != 1) { /* [SS] 2020-06-25 2020-07-05 */
-		    event_warning("do not use integer microtone without calling %%MIDI temperamentequal");
-	            }
-	    parsed = 1;
-	    }
-          }
-	  if (parsed ==1) {
-            j = (int) c - 'A';
-            if (j > 7) j = (int) c - 'a';
-            if (j > 7 || j < 0) {printf("invalid j = %d\n",j); exit(-1);}
-            if (word[0] == '_') a = -a;
-	    modmap[j] = word[0];
-	    modmicrotone[j].num = a;
-	    modmicrotone[j].denom = b;
-	    /* printf("%c microtone = %d/%d\n",modmap[j],modmicrotone[j].num,modmicrotone[j].denom); */
-	  }
-	} /* finished ^ = _ */
-    }
+	  /* parsed =0; [SS] 2020-09-30 */
+   process_microtones (&parsed,  word,
+        modmap, modmul, modmicrotone);
+   }
+
   if ((parsed == 0) && (strlen (word) > 0))
     {
       sprintf (msg, "Ignoring string '%s' in K: field", word);
@@ -1432,11 +1595,10 @@ parsekey (str)
       explict = 1;		/* [SS] 2010-07-29 */
     }
   event_key (sf, str, modeindex, modmap, modmul, modmicrotone, gotkey,
-	     gotclef, clefstr, octave, transpose, gotoctave, gottranspose,
+	     gotclef, clefstr, &newclef, octave, transpose, gotoctave, gottranspose,
 	     explict);
   return (gotkey);
 }
-
 
 void
 parsevoice (s)
@@ -1447,6 +1609,7 @@ parsevoice (s)
   char word[64]; /* 2017-10-11 */
   int parsed;
   int coctave, cgotoctave;
+  int is_new = 0;
 
   vparams.transpose = 0;
   vparams.gottranspose = 0;
@@ -1462,48 +1625,56 @@ parsevoice (s)
   vparams.other[0] = '\0';	/* [SS] 2011-04-18 */
 
   skipspace (&s);
-  if (isnumberp (&s) == 1)
-    {
-      num = readnump (&s);
-    }
-  else
-    {
-      num = interpret_voicestring (s);
-      if (num == 0)
-	event_error ("No voice number or string in V: field");
-      if (num == -1)
-	{
-	  event_error ("More than 16 voices encountered in V: fields");
-	  num = 0;
-	}
-      skiptospace (&s);
-    };
+  num = 0;
+  if (isdigit(*s)) {  /* [JA] 2020-10-12 */
+    num = readnump (&s);
+  }
+  num = interpret_voice_label (s, num, &is_new);
+  if (is_new) {
+    /* declaring voice for the first time.
+     * initialize with values set in the tune header */
+    set_voice_from_master(num);
+  }
+  has_voice_fields = 1;
+  skiptospace (&s);
+  voicenum = num;
   skipspace (&s);
-  while (*s != '\0')
-    {
-      parsed =
-	parseclef (&s, word, &vparams.gotclef, vparams.clefname, &cgotoctave,
-		   &coctave);
+  while (*s != '\0') {
+    parsed =
+      parseclef (&s, word, &vparams.gotclef, vparams.clefname,
+                 &vparams.new_clef, &cgotoctave, &coctave);
+      /* printf("vparams.clefname =%s\n",vparams.clefname); */
+      /* do not create a tablature voice [SS] 2022.07.31 */
+      if (strcmp(vparams.clefname,"tab") == 0) return; 
+      if (vparams.gotclef) {
+        /* make clef an attribute of current voice */
+        copy_clef (&voicecode[num - 1].clef, &vparams.new_clef);
+      }
       if (!parsed)
-	parsed =
-	  parsetranspose (&s, word, &vparams.gottranspose,
-			  &vparams.transpose);
+        parsed =
+          parsetranspose (&s, word, &vparams.gottranspose,
+            &vparams.transpose);
       if (!parsed)
-	parsed = parseoctave (&s, word, &vparams.gotoctave, &vparams.octave);
+        parsed = parseoctave (&s, word, &vparams.gotoctave, &vparams.octave);
       if (!parsed)
-	parsed =
-	  parsename (&s, word, &vparams.gotname, vparams.namestring,
-		     V_STRLEN);
+        parsed = parsesound (&s, word, &vparams.gottranspose, &vparams.transpose);
+      /* Code changed JA 20 May 2022 */
+      if ((!parsed) && (strcasecmp (word, "name") == 0)) {
+        parsed =
+          parsename (&s, &vparams.gotname, vparams.namestring,
+            V_STRLEN);
+      }
+      if ((!parsed) && (strcasecmp (word, "sname") == 0)) {
+        parsed =
+          parsename (&s, &vparams.gotsname, vparams.snamestring,
+            V_STRLEN);
+      }
       if (!parsed)
-	parsed =
-	  parsesname (&s, word, &vparams.gotsname, vparams.snamestring,
-		      V_STRLEN);
+        parsed =
+          parsemiddle (&s, word, &vparams.gotmiddle, vparams.middlestring,
+            V_STRLEN);
       if (!parsed)
-	parsed =
-	  parsemiddle (&s, word, &vparams.gotmiddle, vparams.middlestring,
-		       V_STRLEN);
-      if (!parsed)
-	parsed = parseother (&s, word, &vparams.gotother, vparams.other, V_STRLEN);	/* [SS] 2011-04-18 */
+        parsed = parseother (&s, word, &vparams.gotother, vparams.other, V_STRLEN);  /* [SS] 2011-04-18 */
     }
   /* [SS] 2015-05-13 allow octave= to change the clef= octave setting */
   /* cgotoctave may be set to 1 by a clef=. vparams.gotoctave is set  */
@@ -1715,7 +1886,7 @@ parsenote (s)
   else
     {
       readlen (&n, &m, s);
-      event_note (decorators, accidental, mult, note, octave, n, m);
+      event_note (decorators, &voicecode[voicenum - 1].clef, accidental, mult, note, octave, n, m);
       if (!microtone)
 	event_normal_tone ();	/* [SS] 2014-01-09 */
     };
@@ -1868,7 +2039,7 @@ FILE * parse_abc_include (s)
   char includefilename[80];
   FILE *includehandle;
   int success;
-  success = sscanf (s, "%%%%abc-include %80s", includefilename); /* [SS] 2014-08-11 */
+  success = sscanf (s, "%%%%abc-include %79s", includefilename); /* [SS] 2014-08-11 */
   if (success == 1) {
     /* printf("opening include file %s\n",includefilename); */
     includehandle = fopen(includefilename,"r");
@@ -1881,89 +2052,78 @@ FILE * parse_abc_include (s)
   return NULL; 
 }
 
-
+/* Function mofied for umlaut handling JA 20 May 2022 */
 void
 parse_tempo (place)
      char *place;
 /* parse tempo descriptor i.e. Q: field */
 {
   char *p;
+  char *after_pre;
   int a, b;
   int n;
   int relative;
   char *pre_string;
   char *post_string;
+  struct vstring pre;
+  struct vstring post;
 
   relative = 0;
   p = place;
   pre_string = NULL;
-  if (*p == '"')
-    {
-      p = p + 1;
-      pre_string = p;
-      while ((*p != '"') && (*p != '\0'))
-	{
-	  p = p + 1;
-	};
-      if (*p == '\0')
-	{
-	  event_error ("Missing closing double quote");
-	}
-      else
-	{
-	  *p = '\0';
-	  p = p + 1;
-	  place = p;
-	};
-    };
+  initvstring (&pre);
+  if (*p == '"') {
+    p = p + 1; /* skip over opening double quote */
+    p = umlaut_build_string(p, &pre);
+    pre_string = pre.st;
+    if (*p == '\0') {
+      event_error ("Missing closing double quote");
+    } else {
+      p = p + 1; /* skip over closing double quote */
+      place = p;
+    }
+  }
+  after_pre = p;
+  /* do we have an "=" ? */
   while ((*p != '\0') && (*p != '='))
     p = p + 1;
-  if (*p == '=')
-    {
-      p = place;
-      skipspace (&p);
-      if (((*p >= 'A') && (*p <= 'G')) || ((*p >= 'a') && (*p <= 'g')))
-	{
-	  relative = 1;
-	  p = p + 1;
-	};
-      readlen (&a, &b, &p);
-      skipspace (&p);
-      if (*p != '=')
-	{
-	  event_error ("Expecting = in tempo");
-	};
+  if (*p == '=') {
+    p = place;
+    skipspace (&p);
+    if (((*p >= 'A') && (*p <= 'G')) || ((*p >= 'a') && (*p <= 'g'))) {
+      relative = 1;
       p = p + 1;
     }
-  else
-    {
-      a = 1;			/* [SS] 2013-01-27 */
-      /*a = 0;  [SS] 2013-01-27 */
-      b = 4;
-      p = place;
-    };
+    readlen (&a, &b, &p);
+    skipspace (&p);
+    if (*p != '=') {
+      event_error ("Expecting = in tempo");
+    }
+    p = p + 1;
+  } else {
+    /* no "=" found - default to 1/4 note */
+    a = 1;                      /* [SS] 2013-01-27 */
+    b = 4;
+    p = after_pre;
+  }
   skipspace (&p);
-  n = readnump (&p);
+  n = readnump (&p); /* read notes per minute value */
   post_string = NULL;
-  if (*p == '"')
-    {
-      p = p + 1;
-      post_string = p;
-      while ((*p != '"') && (*p != '\0'))
-	{
-	  p = p + 1;
-	};
-      if (*p == '\0')
-	{
-	  event_error ("Missing closing double quote");
-	}
-      else
-	{
-	  *p = '\0';
-	  p = p + 1;
-	};
-    };
+  initvstring (&post);
+  skipspace (&p);
+  if (*p == '"') {
+    p = p + 1; /* skip over opening double quote */
+    p = umlaut_build_string(p, &post);
+    post_string = post.st;
+    if (*p == '\0') {
+      event_error ("Missing closing double quote");
+    } else {
+      p = p + 1; /* skip over closing double quote */
+    }
+  }
   event_tempo (n, a, b, relative, pre_string, post_string);
+  freevstring (&pre);
+  freevstring (&post);
 }
 
 void appendfield(char *); /* links with store.c and yapstree.c */
@@ -1973,17 +2133,24 @@ char key;
 char *s;
 {
 appendfield(s);
-} 
+}
 
-void
-preparse_words (s)
-     char *s;
-/* takes a line of lyrics (w: field) and strips off */
-/* any continuation character */
+/* [JA] 2022-06-14 */
+/* Second level of processing for a line of lyrics, takes either
+ * w: with any + at the start removed or +: .
+ * It then strips off any continuation character
+ * append is set to
+ *   PLUS_FIELD for +:
+ *   W_PLUS_FIELD for w: + <lyrics>
+ *   0 for regular w: <lyrics>
+ */
+void preparse2_words(char *field, int append)
 {
   int continuation;
   int l;
+  char *s;
 
+  s = field;
   /* printf("Parsing %s\n", s); */
   /* strip off any trailing spaces */
   l = strlen (s) - 1;
@@ -1999,7 +2166,6 @@ preparse_words (s)
   else
     {
       /* [SS] 2014-08-14 */
-      event_warning ("\\n continuation no longer supported in w: line");
       continuation = 1;
       /* remove continuation character */
       *(s + l) = '\0';
@@ -2010,7 +2176,28 @@ preparse_words (s)
 	  l = l - 1;
 	};
     };
-  event_words (s, continuation);
+  event_words (s, append, continuation);
+}
+
+/* first level of w: field processing
+ * takes a line of lyrics (w: field)  and handles
+ * any + after w:
+ */
+void preparse1_words (char *field)
+{
+  int append;
+  char *s;
+
+  /* look for '+' at the start of word field */
+  s = field;
+  append = 0;
+  skipspace(&s);
+  if (*s == '+') {
+    append = W_PLUS_FIELD;
+    s = s + 1;
+    skipspace(&s);
+  }
+  preparse2_words(s, append);
 }
 
 void
@@ -2075,6 +2262,45 @@ free_abbreviations ()
     };
 }
 
+/* function to resolve unit note length when the
+ * L: field is missing in the header [JA] 2020-12-10
+ *
+ * From the abc standard 2.2:
+ * If there is no L: field defined, a unit note length is set by default,
+ * based on the meter field M:. This default is calculated by computing
+ * the meter as a decimal: if it is less than 0.75 the default unit note
+ * length is a sixteenth note; if it is 0.75 or greater, it is an eighth
+ * note. For example, 2/4 = 0.5, so, the default unit note length is a
+ * sixteenth note, while for 4/4 = 1.0, or 6/8 = 0.75, or 3/4= 0.75,
+ * it is an eighth note. For M:C (4/4), M:C| (2/2) and M:none (free meter),
+ * the default unit note length is 1/8.
+ *
+ */
+static void resolve_unitlen()
+{
+  if (master_unitlen == -1)
+  {
+    if (has_timesig == 0)
+    {
+      event_default_length(8);
+      master_unitlen = 8;
+    }
+    else
+    {
+      if (((4 * master_timesig.num)/master_timesig.denom) >= 3)
+      {
+        event_default_length(8);
+        master_unitlen = 8;
+      }
+      else
+      {
+        event_default_length(16);
+        master_unitlen = 16;
+      }
+    }
+  }
+}
+
 void
 parsefield (key, field)
      char key;
@@ -2098,9 +2324,14 @@ parsefield (key, field)
 	{
 	  event_error ("second X: field in header");
 	};
+      if (inbody)
+      {
+       /* [JA] 2020-10-14 */
+        event_error ("Missing blank line before new tune");
+      }
       event_refno (x);
       ignore_line =0; /* [SS] 2017-04-12 */
-      init_voicecode ();	/* [SS] 2011-01-01 */
+      reset_parser_status(); /* [JA] 2020-10-12 */
       inhead = 1;
       inbody = 0;
       parserinchord = 0;
@@ -2132,9 +2363,20 @@ parsefield (key, field)
   switch (key)
     {
     case 'K':
-      foundkey = parsekey (place);
-      if (inhead || inbody)
-	{
+      if (inhead)
+      {
+        /* First K: is the end of the header and the start of the body.
+         * make sure we set up default for unit length
+         * if L: fields was missing in the header.
+         */
+        resolve_unitlen();
+      }
+      foundkey = parsekey (place); /* [JA] 2021.05.21 parsekey called before set_voice_from_master(1) */
+      if (inhead) {
+        /* set voice parameters using values from header */
+        set_voice_from_master(1);
+      }
+      if (inhead || inbody) {
 	  if (foundkey)
 	    {
 	      inbody = 1;
@@ -2155,40 +2397,42 @@ parsefield (key, field)
       break;
     case 'M':
       {
-	int num, denom;
+        timesig_details_t timesig;
 
 	/* strncpy (timesigstring, place, 16);   [SS] 2011-08-19 */
+#ifdef NO_SNPRINT 
+	sprintf(timesigstring,"%s",place); /* [SEG] 2020-06-07 */
+#else
 	snprintf(timesigstring,sizeof(timesigstring),"%s",place); /* [SEG] 2020-06-07 */
-	if (strncmp (place, "none", 4) == 0)
-        /* converts 'M: none'  to 'M: 4/4' otherwise a warning 
-	 * is returned if not a fraction [SS] */
-	  {
-	    event_timesig (4, 4, 0);
-	  }
-	else
-	  {
-	    readsig (&num, &denom, &place);
-	    if ((*place == 's') || (*place == 'l'))
-	      {
-		event_error ("s and l in M: field not supported");
-	      };
-	    if ((num != 0) && (denom != 0))
-	      {
-		/* [code contributed by Larry Myerscough 2015-11-5]
-		 * Specify checkbars = 1 for numeric time signature
-		 * or checkbars = 2 for 'common' time signature to
-		 * remain faithful to style of input abc file.
-		 */
-		event_timesig (num, denom, 1 + ((*place == 'C') || (*place == 'c')));
-	      };
-	  };
-	break;
-      };
+#endif
+        readsig (&place, &timesig);
+        if ((*place == 's') || (*place == 'l')) {
+          event_error ("s and l in M: field not supported");
+        };
+        if ((timesig.num == 0) || (timesig.denom == 0)) {
+          event_warning ("Invalid time signature ignored");
+        } else {
+          if (inhead) {
+            /* copy timesig into master_timesig */
+            copy_timesig(&master_timesig, &timesig);
+          } 
+          if (inbody) { 
+            /* update timesig in current voice */
+            voice_context_t *current_voice;
+
+            current_voice = &voicecode[voicenum - 1];
+            copy_timesig(&current_voice->timesig, &timesig);
+          }
+          event_timesig (&timesig);
+          has_timesig = 1;
+        }
+      }
+	    break;
     case 'L':
       {
 	int num, denom;
 
-	readsig (&num, &denom, &place);
+  read_L_unitlen(&num, &denom, &place);
 	if (num != 1)
 	  {
 	    event_error ("Default length must be 1/X");
@@ -2198,6 +2442,16 @@ parsefield (key, field)
 	    if (denom > 0)
 	      {
 		event_length (denom);
+            if (inhead)
+            {
+              master_unitlen = denom;
+            }
+            if (inbody) {
+              voice_context_t *current_voice;
+
+              current_voice = &voicecode[voicenum - 1];
+              current_voice->unitlen = denom;
+            }
 	      }
 	    else
 	      {
@@ -2282,7 +2536,11 @@ parsefield (key, field)
       };
       break;
     case 'w':
-      preparse_words (place);
+      preparse1_words (place);
+      break;
+    case '+':
+      /* implement +: field as meaning w: + <lyrics> */
+      preparse2_words(place, PLUS_FIELD);
       break;
     case 'd':
       /* decoration line in abcm2ps */
@@ -2291,10 +2549,6 @@ parsefield (key, field)
     case 's':
       event_field (key, place);	/* [SS] 2010-02-23 */
       break;
-    case '+':
-      if (lastfieldcmd == 'w') 
-          append_fieldcmd (key, place); /*[SS] 2014-08-15 */
-      break; /* [SS] 2014-09-07 */
     default:
       event_field (key, place);
     };
@@ -2359,6 +2613,258 @@ print_inputline ()
   printf ("\n");
 }
 
+/* [JA] 2020-10-12 */
+/* Look for problems in the use of repeats */
+static void check_bar_repeats (int bar_type, char *replist)
+{
+  voice_context_t *cv = &voicecode[voicenum];
+
+  switch (bar_type) {
+    case SINGLE_BAR:
+      break;
+    case DOUBLE_BAR:
+      break;
+    case THIN_THICK:
+      break;
+    case THICK_THIN:
+      break;
+    case BAR_REP:
+      if (cv->expect_repeat) {
+        event_warning ("Expecting repeat, found |:");
+      };
+      cv->expect_repeat = 1;
+      cv->repeat_count = cv->repeat_count + 1;
+      break;
+    case REP_BAR:
+      if (!cv->expect_repeat) {
+        char error_message[80];
+
+        if (cv->repeat_count == 0)
+        {
+#ifdef NO_SNPRINT 
+          sprintf(error_message, "Missing repeat at start ? Unexpected :|%s found", replist);
+#else
+          snprintf(error_message, 80, "Missing repeat at start ? Unexpected :|%s found", replist);
+#endif
+          event_warning (error_message);
+        }
+        else
+        {
+#ifdef NO_SNPRINT 
+          sprintf(error_message,  "Unexpected :|%s found", replist);
+#else
+          snprintf(error_message, 80, "Unexpected :|%s found", replist);
+#endif
+
+          event_warning (error_message);
+        }
+      };
+      cv->expect_repeat = 0;
+      cv->repeat_count = cv->repeat_count + 1;
+      break;
+    case BAR1:
+      if (!cv->expect_repeat) {
+        if (cv->repeat_count == 0)
+        {
+          event_warning ("Missing repeat at start ? found |1");
+        }
+        else
+        {
+          event_warning ("found |1 in non-repeat section");
+        }
+      };
+      break;
+    case REP_BAR2:
+      if (!cv->expect_repeat) {
+        if (cv->repeat_count == 0)
+        {
+          event_warning ("Missing repeat at start ? found :|2");
+        }
+        else
+        {
+          event_warning ("No repeat expected, found :|2");
+        }
+      };
+      cv->expect_repeat = 0;
+      cv->repeat_count = cv->repeat_count + 1;
+      break;
+    case DOUBLE_REP:
+      if (!cv->expect_repeat) {
+        if (cv->repeat_count == 0)
+        {
+          event_warning ("Missing repeat at start ? found ::");
+        }
+        else
+        {
+          event_warning ("No repeat expected, found ::");
+        }
+      };
+      cv->expect_repeat = 1;
+      cv->repeat_count = cv->repeat_count + 1;
+      break;
+  };
+}
+
+/* [JA] 2020-10-12 */
+static void check_and_call_bar(int bar_type, char *replist)
+{
+  if (repcheck)
+  {
+    check_bar_repeats (bar_type, replist);
+  }
+  event_bar (bar_type, replist);
+}
+
+
+/* [SS] 2021-10-11   */
+static int pitch2midi(note, accidental, mult, octave )
+/* computes MIDI pitch for note.
+*/
+char note, accidental;
+int mult, octave;
+{
+  int p;
+  char acc;
+  int mul, noteno;
+  int pitch;
+
+  static int scale[7] = {0, 2, 4, 5, 7, 9, 11};
+
+  static const char *anoctave = "cdefgab";
+  acc = accidental;
+  mul = mult;
+  noteno = (int)note - 'a';
+ 
+  p = (int) ((long) strchr(anoctave, note) - (long) anoctave);
+  p = scale[p];
+  if (acc == '^') p = p + mul;
+  if (acc == '_') p = p - mul;
+  p = p + 12*octave + 60;
+return p; 
+}
+
+
+
+/* [SS] 2021-10-11   */
+int
+note2midi (char** s)
+{
+/* for implementing sound=, shift= and instrument= key signature options */
+
+/* check for accidentals */
+char note, accidental;
+char msg[80];
+int octave;
+int mult;
+int pitch;
+/*printf("note2midi: %c\n",**s); */
+if (**s == '\0') return 72;
+mult = 1;
+accidental = ' ';
+switch (**s)
+    {
+    case '_':
+      accidental = **s;
+      *s = *s + 1;
+      if (**s == '_')
+        {
+          *s = *s + 1;
+          mult = 2;
+        };
+      break;
+    case '^':
+      accidental = **s;
+      *s = *s + 1;
+      if (**s == '^')
+        {
+          *s = *s + 1;
+          mult = 2;
+        };
+      break;
+    case '=':
+      accidental = **s;
+      *s = *s + 1;
+      break;
+    default:
+      break;
+    };
+
+  if ((**s >= 'a') && (**s <= 'g'))
+    {
+      note = **s;
+      octave = 1;
+      *s = *s + 1;
+      while ((**s == '\'') || (**s == ',') || (**s == '/'))
+        {
+          if (**s == '\'')
+            {
+              octave = octave + 1;
+              *s = *s + 1;
+            };
+          if (**s == ',')
+            {
+              sprintf (msg, "Bad pitch specifier , after note %c", note);
+              event_error (msg); 
+              octave = octave - 1;
+              *s = *s + 1;
+            };
+          if (**s == '/')
+             {
+             /* skip / which occurs in instrument = command */
+              *s = *s + 1;
+/*  printf("note = %c  accidental = %c mult = %d octave= %d \n",note,accidental,mult,octave); */
+              pitch = pitch2midi(note, accidental, mult, octave);
+              return pitch;
+              }
+        };
+    }
+  else
+    {
+      octave = 0;
+      if ((**s >= 'A') && (**s <= 'G'))
+        {
+          note = **s + 'a' - 'A';
+          *s = *s + 1;
+          while ((**s == '\'') || (**s == ',') || (**s == '/'))
+            {
+              if (**s == ',')
+                {
+                  octave = octave - 1;
+                  *s = *s + 1;
+                };
+              if (**s == '\'')
+                {
+                  sprintf (msg, "Bad pitch specifier ' after note %c",
+                           note + 'A' - 'a');
+                  event_error (msg); 
+                  octave = octave + 1;
+                  *s = *s + 1;
+                };
+          if (**s == '/')
+             {
+             /* skip / which occurs in instrument = command */
+              *s = *s + 1;
+/*  printf("note = %c  accidental = %c mult = %d octave= %d \n",note,accidental,mult,octave); */
+              pitch = pitch2midi(note, accidental, mult, octave);
+              return pitch;
+            };
+        };
+    };
+ /* printf("note = %c  accidental = %c mult = %d octave= %d \n",note,accidental,mult,octave); */
+  } 
+  if (note == ' ')
+    {
+      event_error ("Malformed note : expecting a-g or A-G");
+    }
+  pitch = pitch2midi(note, accidental, mult, octave);
+  return pitch;
+}
+
+
+
+
+
+
 void
 parsemusic (field)
      char *field;
@@ -2404,6 +2910,11 @@ parsemusic (field)
           p = p+1;
           }
 
+      if (*p == '.' && *(p+1) == '|') { /* [SS] 2022-08.01 dotted bar */
+         p = p +1;
+         /* ignore dotted bar */
+         }
+
       if (((*p >= 'a') && (*p <= 'g')) || ((*p >= 'A') && (*p <= 'G')) ||
 	  (strchr ("_^=", *p) != NULL) || (strchr (decorations, *p) != NULL))
 	{
@@ -2418,13 +2929,12 @@ parsemusic (field)
 	      {
 		struct vstring gchord;
 
-		p = p + 1;
 		initvstring (&gchord);
-		while ((*p != '"') && (*p != '\0'))
-		  {
-		    addch (*p, &gchord);
-		    p = p + 1;
-		  };
+    /* modified JA 20 May 2022 */
+    /* need to allow umlaut sequence in "guitar chords" which
+     * are being used for arbitrary text e.g. "_last time"
+     */
+    p = umlaut_build_string(p+1, &gchord);
 		if (*p == '\0')
 		  {
 		    event_error ("Guitar chord name not properly closed");
@@ -2442,20 +2952,20 @@ parsemusic (field)
 	      switch (*p)
 		{
 		case ':':
-		  event_bar (BAR_REP, "");
+		  check_and_call_bar (BAR_REP, "");
 		  p = p + 1;
 		  break;
 		case '|':
-		  event_bar (DOUBLE_BAR, "");
+		  check_and_call_bar (DOUBLE_BAR, "");
 		  p = p + 1;
 		  break;
 		case ']':
-		  event_bar (THIN_THICK, "");
+		  check_and_call_bar (THIN_THICK, "");
 		  p = p + 1;
 		  break;
 		default:
 		  p = getrep (p, playonrep_list);
-		  event_bar (SINGLE_BAR, playonrep_list);
+		  check_and_call_bar (SINGLE_BAR, playonrep_list);
 		};
 	      break;
 	    case ':':
@@ -2463,20 +2973,20 @@ parsemusic (field)
 	      switch (*p)
 		{
 		case ':':
-		  event_bar (DOUBLE_REP, "");
+		  check_and_call_bar (DOUBLE_REP, "");
 		  p = p + 1;
 		  break;
 		case '|':
 		  p = p + 1;
 		  p = getrep (p, playonrep_list);
-		  event_bar (REP_BAR, playonrep_list);
+		  check_and_call_bar (REP_BAR, playonrep_list);
 		  if (*p == ']')
 		    p = p + 1;	/* [SS] 2013-10-31 */
 		  break;
                 /*  [JM] 2018-02-22 dotted bar line ... this is legal */
 		default:
                 /* [SS] 2018-02-08 introducing DOTTED_BAR */
-		  event_bar (DOTTED_BAR,"");
+		  check_and_call_bar (DOTTED_BAR,"");
 		};
 	      break;
 	    case ' ':
@@ -2541,9 +3051,9 @@ parsemusic (field)
 		{
 		case '|':
 		  p = p + 1;
-		  event_bar (THICK_THIN, "");
+		  check_and_call_bar (THICK_THIN, "");
 		  if (*p == ':') {  /* [SS] 2015-04-13 [SDG] 2020-06-04 */
-		      event_bar (BAR_REP, "");
+		      check_and_call_bar (BAR_REP, "");
 		      p = p + 1;
 		      }
 		  break;
@@ -2579,7 +3089,7 @@ parsemusic (field)
 	      /*if (!inchordflag && *p == '|') {  [SS] 2018-12-21 not THICK_THIN  bar line*/
 	      if (!parserinchord && *p == '|') { /* [SS] 2019-06-06 not THICK_THIN  bar line*/
                 p = p + 1; /* skip over | */
-	        event_bar (THIN_THICK, "");}
+	        check_and_call_bar (THIN_THICK, "");}
               else {
 	        readlen (&chord_n, &chord_m, &p); /* [SS] 2019-06-06 */
 	        event_chordoff (chord_n, chord_m);
@@ -2591,6 +3101,10 @@ parsemusic (field)
 		  decorators_passback[i] = 0;	/* [SS] 2012-03-30 */
 		}
 	      break;
+      case '$':
+        p = p + 1;
+        event_score_linebreak ('$');  /* [JA] 2020-10-07 */
+        break;
 /*  hidden rest  */
 	    case 'x':
 	      {
@@ -2824,8 +3338,6 @@ parsemusic (field)
 		  {
 		    event_reserved (*p);
 		  }
-		else if (fileprogram == ABC2MIDI && *p == '$') ; /* ignore [SS] 2019-12-9 */
-	       	/* $ sometimes used as a score linebreak character */
 		else
 		  {
 		    sprintf (msg, "Unrecognized character: %c", *p);
@@ -2850,13 +3362,21 @@ parseline (line)
 {
   char *p, *q;
 
-  /* [SS] 2020-01-03 */
-  if (strcmp(line,"%%begintext") == 0) {
+  /* [SS] 2020-01-03 2021-02-21 */
+  if (strstr(line,"%%begintext") != NULL) {
 	  ignore_line = 1;
           }
-  if (strcmp(line,"%%endtext") == 0) {
+  if (strstr(line,"%%endtext") != NULL) {
 	  ignore_line = 0;
           }
+  /* [SS] 2021-05-09 */
+  if (strcmp(line,"%%beginps") == 0) {
+	  ignore_line = 1;
+          }
+  if (strcmp(line,"%%endps") == 0) {
+	  ignore_line = 0;
+          }
+
   if ((strncmp(line,"%%temperament",12) == 0) && fileprogram == ABC2MIDI) {
 	  event_temperament(line);
           }
@@ -2928,7 +3448,7 @@ parseline (line)
 		  if (parsing)
 		    parsemusic (p);
 		}
-	      else if (inbody) preparse_words (p); /* [SS] 2017-10-23 */
+	      else if (inbody) preparse1_words (p); /* [SS] 2017-10-23 */
 	      else {
 		  if (parsing)
 		    event_text (p);

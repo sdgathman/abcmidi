@@ -26,6 +26,7 @@
 
 #ifdef _MSC_VER
 #define ANSILIBS 1
+#define snprintf _snprintf
 #endif
 
 #include <stdio.h>
@@ -38,6 +39,7 @@
 #include "abc.h"
 #include "structs.h"
 #include "sizes.h"
+#include "parseabc.h"
 #include "drawtune.h"
 
 /* external functions  and variables */
@@ -45,8 +47,6 @@ extern struct tune thetune;
 extern int debugging;
 extern int pagenumbering;
 extern int barnums, nnbars;
-extern char outputname[256];
-extern char outputroot[256];
 extern int make_open();
 extern void printlib();
 extern int count_dots(int *base, int *base_exp, int n, int m);
@@ -58,7 +58,7 @@ extern void spacevoices(struct tune* t);
 extern void showtune(struct tune *t);
 
 struct key* newkey(char* name, int sharps, char accidental[], int mult[]);
-struct aclef* newclef(enum cleftype t, int octave);
+cleftype_t* newclef(cleftype_t* clef);
 char* addstring(char *s);
 extern int lineno;
 extern int separate_voices;
@@ -595,40 +595,78 @@ static void staveline()
   fprintf(f, "%.1f staff\n", scaledwidth);
 }
 
-static void printclef(struct aclef* t, double x, double yup, double ydown)
+static void printclef (cleftype_t * t, double x, double yup,
+                       double ydown)
 /* draw a clef of the specified type */
 {
-  switch (t->type) {
-  case treble:
-    fprintf(f, "%.1f tclef\n", x);
-    break;
-  case bass:
-    fprintf(f, "%.1f bclef\n", x);
-    break;
-  case alto:
-    fprintf(f, "%.1f cclef\n", x);
-    break;
-  case baritone:
-    fprintf(f, "0 %d T %.1f cclef 0 %d T\n", 4*TONE_HT, x, -4*TONE_HT);
-    break;
-  case tenor:
-    fprintf(f, "0 %d T %.1f cclef 0 %d T\n", 2*TONE_HT, x, -2*TONE_HT);
-    break;
-  case mezzo:
-    fprintf(f, "0 %d T %.1f cclef 0 %d T\n", -2*TONE_HT, x, 2*TONE_HT);
-    break;
-  case soprano:
-    fprintf(f, "0 %d T %.1f cclef 0 %d T\n", -4*TONE_HT, x, 4*TONE_HT);
-    break;
-  default:
-    break;
-  };
-  if (t->octave > 0) {
-    fprintf(f, "%.1f %.1f (%d) bnum\n", x, yup - CLEFNUM_HT + 3, t->octave);
-  };
-  if (t->octave < 0) {
-    fprintf(f, "%.1f %.1f (%d) bnum\n", x, -ydown, - t->octave);
-  };
+  double y;
+  int num_to_show;
+  double clef_y;
+  double clef_ytop;
+  double clef_ybot;
+
+  y = (TONE_HT * 2) * (t->staveline - 1);
+  switch (t->basic_clef) {
+    case basic_clef_treble:
+    case basic_clef_auto:
+    case basic_clef_perc:
+    case basic_clef_none:
+      clef_y = y - (TONE_HT * 2);
+      fprintf(f, "gsave 0 %.1f T\n", clef_y);
+      fprintf(f, "%.1f tclef grestore\n", x);
+      clef_ytop = clef_y + (TONE_HT * 11);
+      clef_ybot = clef_y - (TONE_HT * 4);
+      break;
+    case basic_clef_bass:
+      clef_y = y - (TONE_HT * 6);
+      fprintf(f, "gsave 0 %.1f T\n", clef_y);
+      fprintf(f, "%.1f bclef grestore\n", x);
+      clef_ytop = clef_y + (TONE_HT * 8);
+      clef_ybot = clef_y - (TONE_HT * 0);
+      break;
+    case basic_clef_alto:
+      clef_y = y - (TONE_HT * 4);
+      fprintf(f, "gsave 0 %.1f T\n", clef_y);
+      fprintf(f, "%.1f cclef grestore\n", x);
+      clef_ytop = clef_y + (TONE_HT * 8);
+      clef_ybot = clef_y - (TONE_HT * 0);
+      break;
+    default:
+      break;
+  }
+  /* make sure we don't draw within staves */
+  if (clef_ybot > 0.0) {
+    clef_ybot = 0.0;
+  }
+  if (clef_ytop < (TONE_HT * 8)) {
+    clef_ytop = TONE_HT * 8;
+  }
+  //do_T (out, 0, -y);
+
+  /* draw -15, -8, +8, +15 above or below clef */
+  switch (t->octave_offset) {
+    case -2:
+      num_to_show = -15;
+      break;
+    case -1:
+      num_to_show = -8;
+      break;
+    case 1:
+      num_to_show = 8;
+      break;
+    case 2:
+      num_to_show = 15;
+      break;
+    default:
+      num_to_show = 0;
+      break;
+  }
+  if (t->octave_offset > 0) {
+    fprintf(f, "%.1f %.1f (+%d) bnum\n", x, clef_ytop + 2, num_to_show);
+  }
+  if (t->octave_offset < 0) {
+    fprintf(f, "%.1f %.1f (%d) bnum\n", x, clef_ybot - CLEFNUM_HT - 2, num_to_show);
+  }
 }
 
 void set_keysig(struct key* k, struct key* newval)
@@ -658,25 +696,48 @@ static double size_keysig(char oldmap[], char newmap[])
   return((double)n * 5.0);
 }
 
-static double size_timesig(struct fract* meter)
+static void get_complex_numerator(char buffer[], timesig_details_t *timesig)
+{
+  int i;
+
+  buffer[0] = '\0';
+  for (i = 0; i < timesig->num_values; i++)
+  {
+    char num_buff[20];
+
+    if (i > 0)
+    {
+      strcat(buffer, "+");
+    }
+    snprintf(num_buff, 20, "%d", timesig->complex_values[i]);
+    num_buff[2] = '\0'; /* truncate to 2 digits */
+    strcat(buffer, num_buff);
+  }
+}
+
+static double size_timesig (timesig_details_t *timesig)
 /* compute width of the time signature */
 {
   double len1, len2;
-  char temp[20];
+  char temp[40];
 
-  sprintf(temp, "%d", meter->num);
-  len1 = stringwidth(temp, 16.0, 2);
-  sprintf(temp, "%d", meter->denom);
-  len2 = stringwidth(temp, 16.0, 2);
-  if (len1 > len2) {
-    return(len1);
+  if (timesig->type == TIMESIG_COMPLEX) {
+    get_complex_numerator(temp, timesig);
   } else {
-    return(len2);
-  };
+    sprintf (temp, "%d", timesig->num);
+  }
+  len1 = stringwidth (temp, 16.0, 2);
+  sprintf (temp, "%d", timesig->denom);
+  len2 = stringwidth (temp, 16.0, 2);
+  if (len1 > len2) {
+    return (len1);
+  } else {
+    return (len2);
+  }
 }
 
 static void draw_keysig(char oldmap[], char newmap[], int newmult[], 
-            double x, struct aclef* clef)
+            double x, cleftype_t* clef)
 /* draw key specified key signature at position x on line           */
 /* arrays oldmap[], newmap[], newmult[] are indexed with a=0 to g=7 */
 /* sharp_pos[] and flat_pos[] give order of notes                   */
@@ -689,32 +750,23 @@ static void draw_keysig(char oldmap[], char newmap[], int newmult[],
   int i;
   int offset, pos;
   int note;
-  
-  switch (clef->type) {
-  case treble:
-    offset = 0;
-    break;
-  case soprano:
-    offset = 2;
-    break;
-  case mezzo:
-    offset = 4;
-    break;
-  case alto:
-    offset = 6;
-    break;
-  case tenor:
-    offset = 8;
-    break;
-  case baritone:
-    offset = 10;
-    break;
-  case bass:
-    offset = 12;
-    break;
-  case noclef:
-    break;
-  };
+ 
+  switch (clef->basic_clef) {
+    case basic_clef_treble:
+    case basic_clef_auto:
+    case basic_clef_perc:
+    case basic_clef_none:
+      offset = 0 + (clef->staveline - 2) * 2;
+      break;
+    case basic_clef_alto:
+      offset = 6 + (clef->staveline - 3) * 2;
+      break;
+    case basic_clef_bass:
+      offset = 12 + (clef->staveline - 6) * 2;
+      break;
+    case basic_clef_undefined:
+      break;
+  }
   xpos = x;
   /* draw naturals to cancel out old accidentals */
   for (i=0; i<7; i++) {
@@ -754,10 +806,48 @@ static void draw_keysig(char oldmap[], char newmap[], int newmult[],
   fprintf(f, "\n");
 }
 
-static void draw_meter(struct fract* meter, double x)
+void draw_csig (double x)
+{
+  fprintf (f, " %.1f csig\n", x);
+}
+
+void draw_ctsig (double x)
+{
+  fprintf (f, " %.1f ctsig\n", x);
+}
+
+void draw_tsig (double x, char *top, char *bot)
+{
+  fprintf (f, " %.1f (%s) (%s) tsig\n", x, top, bot);
+}
+
+static void draw_meter (timesig_details_t *meter, double x)
 /* draw meter (time signature) at specified x value */
 {
-  fprintf(f, "%.1f (%d) (%d) tsig\n", x, meter->num, meter->denom);
+  char num[40];
+  char denom[10];
+
+  switch (meter->type) {
+  case TIMESIG_NORMAL:
+    snprintf (num, 10, "%d", meter->num);
+    snprintf (denom, 10, "%d", meter->denom);
+    draw_tsig (x, num, denom);
+    break;
+  case TIMESIG_COMMON:
+    draw_csig (x);
+    break;
+  case TIMESIG_CUT:
+    draw_ctsig (x);
+    break;
+  case TIMESIG_COMPLEX:
+    get_complex_numerator(num, meter);
+    snprintf (denom, 10, "%d", meter->denom);
+    draw_tsig (x, num, denom);
+    break;
+  default:
+  case TIMESIG_FREE_METER:
+    break;
+  }
 }
 
 static double maxstrwidth(struct llist* strings, double ptsize, int fontno)
@@ -1041,7 +1131,7 @@ static void spacechord(struct feature* chordplace)
   doneflip = 0;
   while ((place != NULL) && (place->type != CHORDOFF)) {
     if ((place->type == CHORDNOTE) || (place->type == NOTE)) {
-      anote = place->item;
+      anote = place->item.voidptr;
       thisy = anote->y;
       if ((lasty - thisy <= 1) && (lastflip != 1)) {
         anote->fliphead = 1;
@@ -1066,7 +1156,7 @@ static void spacechord(struct feature* chordplace)
   place = chordplace;
   while ((place != NULL) && (place->type != CHORDOFF)) {
     if ((place->type == CHORDNOTE) || (place->type == NOTE)) {
-      anote = place->item;
+      anote = place->item.voidptr;
       thisy = anote->y;
       if (anote->accidental != ' ') {
         /* find space for this accidental */
@@ -1114,7 +1204,7 @@ static void drawtuple(struct feature* beamset[], int beamctr, int tupleno)
   int stemup;
 
   x0 = beamset[0]->x;
-  n = beamset[0]->item;
+  n = beamset[0]->item.voidptr;
   stemup = n->stemup;
   if (stemup) {
     y0 = (double)(TONE_HT*n->y) + n->stemlength;
@@ -1122,7 +1212,7 @@ static void drawtuple(struct feature* beamset[], int beamctr, int tupleno)
     y0 = (double)(TONE_HT*n->y) - n->stemlength;
   };
   x1 = beamset[beamctr-1]->x;
-  n = beamset[beamctr-1]->item;
+  n = beamset[beamctr-1]->item.voidptr;
   if (stemup) {
     y1 = (double)(TONE_HT*n->y) + n->stemlength;
   } else {
@@ -1171,7 +1261,7 @@ static void drawbeam(struct feature* beamset[], int beamctr, int dograce)
   };
   fprintf(f, "\n");
   if (redcolor) fprintf(f,"1.0 0.0 0.0 setrgbcolor\n");
-  n = beamset[0]->item;
+  n = beamset[0]->item.voidptr;
   stemup = n->stemup;
   beamdir = 2*stemup - 1;
   donenotes = 1;
@@ -1186,7 +1276,7 @@ static void drawbeam(struct feature* beamset[], int beamctr, int dograce)
     donenotes = 0;
     start = -1;
     for (i=0; i<beamctr; i++) {
-      n = beamset[i]->item;
+      n = beamset[i]->item.voidptr;
       if (n->base_exp <= d) {
         if (start == -1) {
           start = i;
@@ -1201,13 +1291,13 @@ static void drawbeam(struct feature* beamset[], int beamctr, int dograce)
           if (start == stop) {
             if (start != 0) {
               /* half line in front of note */
-              n = beamset[start-1]->item;
+              n = beamset[start-1]->item.voidptr;
               setxy(&x0, &y0, n, beamset[start-1], offset, half_head);
               x0 = x0 + (x1-x0)/2;
               y0 = y0 + (y1-y0)/2;
             } else {
               /* half line behind note */
-              n = beamset[start+1]->item;
+              n = beamset[start+1]->item.voidptr;
               setxy(&x1, &y1, n, beamset[start+1], offset, half_head);
               x1 = x1 + (x0-x1)/2;
               y1 = y1 + (y0-y1)/2;
@@ -1237,20 +1327,77 @@ static void drawbeam(struct feature* beamset[], int beamctr, int dograce)
   if (redcolor) fprintf(f,"0 setgray\n");
 }
 
+static void sizeclef(cleftype_t *theclef, struct feature *ft)
+{
+  double y;
+  double clef_y;
+  double clef_ytop;
+  double clef_ybot;
+
+  /* take account of staveline when calculating clef size */
+  y = (TONE_HT * 2) * (theclef->staveline - 1);
+  switch (theclef->basic_clef) {
+    case basic_clef_treble:
+    case basic_clef_auto:
+    case basic_clef_perc:
+    case basic_clef_none:
+    default:
+      clef_y = y - (TONE_HT * 2);
+      clef_ytop = clef_y + (TONE_HT * 11);
+      clef_ybot = clef_y - (TONE_HT * 6);
+      ft->xright = TREBLE_RIGHT;
+      ft->xleft = TREBLE_LEFT;
+      break;
+    case basic_clef_bass:
+      clef_y = y - (TONE_HT * 6);
+      clef_ytop = clef_y + (TONE_HT * 8);
+      clef_ybot = clef_y - (TONE_HT * 0);
+      ft->xright = BASS_RIGHT;
+      ft->xleft = BASS_LEFT;
+      break;
+    case basic_clef_alto:
+      clef_y = y - (TONE_HT * 4);
+      clef_ytop = clef_y + (TONE_HT * 8);
+      clef_ybot = clef_y - (TONE_HT * 0);
+      ft->xright = CCLEF_RIGHT;
+      ft->xleft = CCLEF_LEFT;
+      break;
+  }
+  /* extend limits to top and bottom of stave if necessary */
+  if (clef_ybot > 0.0)
+  {
+    ft->ydown = 0.0;
+  }
+  if (clef_ytop < (TONE_HT * 8))
+  {
+    clef_ytop = TONE_HT * 8;
+  }
+  /* allow extra space for +8, -8 etc */
+  if (theclef->octave_offset > 0) {
+    clef_ytop = clef_ytop + 2 + CLEFNUM_HT + 2;
+  }
+  if (theclef->octave_offset < 0) {
+    clef_ybot = clef_ybot - CLEFNUM_HT - 2;
+  }
+  ft->yup = clef_ytop;
+  ft->ydown = clef_ybot;
+}
+
 static void sizevoice(struct voice* v, struct tune* t)
 /* compute width and height values for all elements in voice */
 {
-  struct feature* ft;
-  struct note* anote;
-  struct key* akey;
-  struct aclef* theclef;
-  char* astring;
-  struct fract* afract;
-  struct rest* arest;
-  struct note* lastnote;
-  struct chord* thischord;
-  struct feature* chordplace;
-  struct tuple* thistuple;
+  struct feature *ft;
+  struct note *anote;
+  struct key *akey;
+  cleftype_t *theclef;
+  timesig_details_t *timesig;
+  char *astring;
+  struct fract *afract;
+  struct rest *arest;
+  struct note *lastnote;
+  struct chord *thischord;
+  struct feature *chordplace;
+  struct tuple *thistuple;
   enum tail_type chordbeaming;
   int intuple, tuplecount;
   struct feature* tuplefeature;
@@ -1262,8 +1409,7 @@ static void sizevoice(struct voice* v, struct tune* t)
   chordhead = NULL;
   thischord = NULL;
   chordplace = NULL;
-  v->clef->type = t->clef.type;
-  v->clef->octave = t->clef.octave;
+  copy_clef (v->clef, &t->clef);
   if (v->keysig == NULL) {
     event_error("Voice has no key signature");
   };
@@ -1316,25 +1462,30 @@ static void sizevoice(struct voice* v, struct tune* t)
       ft->xright = 0.0;
       break;
     case PART: 
-      astring = ft->item;
+      astring = ft->item.voidptr;
     case TEMPO: 
       break;
-    case TIME: 
-      afract = ft->item;
-      if (afract == NULL) {
-        afract = &v->meter;
-      };
-      ft->xleft = 0;
-      ft->xright = (float) size_timesig(afract);
+    case TIME:
+      {
+        double width;
+
+        timesig = ft->item.voidptr;
+        if (timesig == NULL) {
+          timesig = &v->timesig;
+        }
+        width = size_timesig (timesig);
+        ft->xleft = (float)(width / 2.0);
+        ft->xright = (float)(width / 2.0);
+      }
       break;
     case KEY: 
       ft->xleft = 0;
-      akey = ft->item;
+      akey = ft->item.voidptr;
       ft->xright = (float) size_keysig(v->keysig->map, akey->map);
       set_keysig(v->keysig, akey);
       break;
     case REST: 
-      arest = ft->item;
+      arest = ft->item.voidptr;
       sizerest(arest, ft);
       if (intuple) {
         if (ft->yup > thistuple->height) {
@@ -1350,7 +1501,7 @@ static void sizevoice(struct voice* v, struct tune* t)
       };
       break;
     case TUPLE: 
-      thistuple = ft->item;
+      thistuple = ft->item.voidptr;
       if (thistuple->beamed == 0) {
         intuple = 1;
         tuplecount = thistuple ->r;
@@ -1359,7 +1510,7 @@ static void sizevoice(struct voice* v, struct tune* t)
       };
       break;
     case NOTE: 
-      anote = ft->item;
+      anote = ft->item.voidptr;
       setstemlen(anote, ingrace);
       sizenote(anote, ft, ingrace);
       if (inchord) {
@@ -1447,13 +1598,13 @@ static void sizevoice(struct voice* v, struct tune* t)
     case CHORDON:
       inchord = 1;
       chordcount = 0;
-      thischord = ft->item;
+      thischord = ft->item.voidptr;
       chordplace = ft;
       spacechord(chordplace);
       break;
     case CHORDOFF:
       if (thischord != NULL) {
-        anote = chordhead->item;
+        anote = chordhead->item.voidptr;
         thischord->beaming = chordbeaming;
         if (thischord->beaming == single) {
           sizechord(thischord, ingrace);
@@ -1475,7 +1626,7 @@ static void sizevoice(struct voice* v, struct tune* t)
     case DYNAMIC:
       break;
     case LINENUM:
-      lineno = (int)(ft->item);
+      lineno = ft->item.number;
       break;
     case MUSICLINE: 
       break;
@@ -1485,63 +1636,19 @@ static void sizevoice(struct voice* v, struct tune* t)
       break;
     case WORDSTOP:
       break;
+    case WORDEXTEND:
+      break;
     case INSTRUCTION:
       break;
     case NOBEAM:
       break;
     case CLEF:
-      theclef = ft->item;
+      theclef = ft->item.voidptr;
       if (theclef == NULL) {
         theclef = v->clef;
-      };
-      ft->yup = (double)8*TONE_HT;
-      ft->ydown = 0.0;
-      switch (theclef->type) {
-      case treble:
-        ft->yup = (double)TREBLE_UP;
-        ft->ydown = (double)TREBLE_DOWN;
-        ft->xright = TREBLE_RIGHT;
-        ft->xleft = TREBLE_LEFT;
-        break;
-      case baritone:
-        ft->yup = (double)12*TONE_HT;
-        ft->xright = CCLEF_RIGHT;
-        ft->xleft = CCLEF_LEFT;
-        break;
-      case tenor:
-        ft->yup = (double)10*TONE_HT;
-        ft->xright = CCLEF_RIGHT;
-        ft->xleft = CCLEF_LEFT;
-        break;
-      case alto:
-        ft->xright = CCLEF_RIGHT;
-        ft->xleft = CCLEF_LEFT;
-        break;
-      case mezzo:
-        ft->ydown = (double)2*TONE_HT;
-        ft->xright = CCLEF_RIGHT;
-        ft->xleft = CCLEF_LEFT;
-        break;
-      case soprano:
-        ft->ydown = (double)4*TONE_HT;
-        ft->xright = CCLEF_RIGHT;
-        ft->xleft = CCLEF_LEFT;
-        break;
-      case bass:
-        ft->xright = BASS_RIGHT;
-        ft->xleft = BASS_LEFT;
-        break;
-      case noclef:
-	break;
-      };
-      if (theclef->octave > 0) {
-        ft->yup = ft->yup + CLEFNUM_HT;
-      };
-      if (theclef->octave < 0) {
-        ft->ydown = ft->ydown + CLEFNUM_HT;
-      };
-      v->clef->type = theclef->type;
-      v->clef->octave = theclef->octave;
+      }
+      sizeclef(theclef, ft);
+      copy_clef (v->clef, theclef);
       break;
     case PRINTLINE:
       break;
@@ -1980,7 +2087,7 @@ char *s;
 /* set logical parameter from %%command */
 /* part of the handling for event_specific */
 {
-  char p[10];
+  char p[12]; /* [JA] 2020-09-30 */
   int result;
 
   p[0] = '\0';
@@ -2240,12 +2347,12 @@ static void setbeams(struct feature* note[], struct chord* chording[], int m,
   double max;
 
   /* printf("Doing setbeams m=%d\n", m); */
-  anote = note[0]->item;
+  anote = note[0]->item.voidptr;
   stemup = anote->stemup;
   /* calculate minimum feasible stem lengths */
   /* bearing in mind space needed for the tails */
   for (i=0; i<m; i++) {
-    anote = note[i]->item;
+    anote = note[i]->item.voidptr;
     anote->stemup = stemup;
     switch (anote->base) {
     default:
@@ -2287,7 +2394,7 @@ static void setbeams(struct feature* note[], struct chord* chording[], int m,
         min[i] = TONE_HT*anote->y - min[i];
         /* avoid collision with previous note */
         if (i > 0) {
-          anote = note[i-1]->item;
+          anote = note[i-1]->item.voidptr;
           if (anote->y*TONE_HT < min[i]) {
             min[i] = anote->y*TONE_HT;
           };
@@ -2299,10 +2406,10 @@ static void setbeams(struct feature* note[], struct chord* chording[], int m,
   };
   /* work out clearance from a straight line between 1st and last note */
   x1 = note[0]->x;
-  anote = note[0]->item;
+  anote = note[0]->item.voidptr;
   y1 = anote->y*TONE_HT;
   x2 = note[m-1]->x;
-  anote = note[m-1]->item;
+  anote = note[m-1]->item.voidptr;
   y2 = anote->y*TONE_HT;
   if (x1 == x2) {
     printf("Internal error: x1 = x2 = %.1f\n", x1);
@@ -2341,7 +2448,7 @@ static void setbeams(struct feature* note[], struct chord* chording[], int m,
   };
   /* raise the line just enough to clear notes */
   for (i=0; i<m; i++) {
-    anote = note[i]->item;
+    anote = note[i]->item.voidptr;
     xi = note[i]->x;
     if (stemup) {
       anote->stemlength =  (float) (y1 + (y2-y1)*(xi-x1)/(x2-x1) + lift - 
@@ -2354,7 +2461,7 @@ static void setbeams(struct feature* note[], struct chord* chording[], int m,
   /* now transfer results to chords */
   for (i=0; i<m; i++) {
     if (chording[i] != NULL) {
-      anote = note[i]->item;
+      anote = note[i]->item.voidptr;
       chording[i]->stemup = anote->stemup;
       if (chording[i]->stemup) {
         chording[i]->stemlength = anote->stemlength;
@@ -2393,7 +2500,7 @@ static void beamline(struct feature* ft)
     switch (p->type) {
     case NOTE:
       if (ingrace) {
-        n = p->item;
+        n = p->item.voidptr;
         if (n == NULL) {
           event_error("Missing NOTE!!!!");
           exit(0);
@@ -2412,7 +2519,7 @@ static void beamline(struct feature* ft)
         };
       } else {
         /* non-grace notes*/
-        n = p->item;
+        n = p->item.voidptr;
         if (n == NULL) {
           event_error("Missing NOTE!!!!");
           exit(0);
@@ -2433,9 +2540,9 @@ static void beamline(struct feature* ft)
       break;
     case CHORDON:
       if (ingrace) {
-        gracelastchord = p->item;
+        gracelastchord = p->item.voidptr;
       } else {
-        lastchord = p->item;
+        lastchord = p->item.voidptr;
       };
       break;
     case CHORDOFF:
@@ -2483,7 +2590,7 @@ static void measureline(struct feature* ft, double* height, double* descender,
   while ((p != NULL) && (p->type != PRINTLINE)) {
     switch (p->type) {
     case NOTE:
-      n = p->item;
+      n = p->item.voidptr;
       if (n == NULL) {
         event_error("Missing NOTE!!!!");
         exit(0);
@@ -2532,7 +2639,7 @@ static void measureline(struct feature* ft, double* height, double* descender,
       };
       break;
     case REST:
-      r = p->item;
+      r = p->item.voidptr;
       if (r == NULL) {
         event_error("Missing REST!!!!");
         exit(0);
@@ -2712,10 +2819,9 @@ static void resetvoice(struct tune* t, struct voice * v)
 {
   v->place = v->first;
   if (v->clef == NULL) {
-    v->clef = newclef(t->clef.type, t->clef.octave);
+    v->clef = newclef(&t->clef);
   } else {
-    v->clef->type = t->clef.type;
-    v->clef->octave = t->clef.octave;
+    copy_clef (v->clef, &t->clef);
   };
   if (v->keysig == NULL) {
     v->keysig = newkey(t->keysig->name, t->keysig->sharps, 
@@ -2726,8 +2832,7 @@ static void resetvoice(struct tune* t, struct voice * v)
     set_keysig(v->keysig, t->keysig);
     /* v->keysig->sharps = t->keysig->sharps; */
   };
-  v->meter.num = t->meter.num;
-  v->meter.denom = t->meter.denom;
+  copy_timesig(&v->timesig, &t->timesig);
 }
 
 static void resettune(struct tune* t)
@@ -2801,6 +2906,7 @@ static void drawslurtie(struct slurtie* s)
   struct feature* ft;
   struct note* n;
   struct rest* r;
+  int stemup = 0;
 
   ft = s->begin;
   if (ft == NULL)  {
@@ -2809,11 +2915,12 @@ static void drawslurtie(struct slurtie* s)
   };
   x0 = ft->x;
   if ((ft->type == NOTE) || (ft->type == CHORDNOTE)) {
-    n = ft->item;
+    n = ft->item.voidptr;
     y0 = (double)(n->y * TONE_HT);
+    stemup = n->stemup;
   } else {
     if (ft->type == REST) {
-      r = ft->item;
+      r = ft->item.voidptr;
       y0 = (double)(4 * TONE_HT);
     } else {
       printf("Internal error: NOT A NOTE/REST (%d)in slur/tie\n" ,ft->type);
@@ -2833,11 +2940,12 @@ static void drawslurtie(struct slurtie* s)
     };
     x1 = ft->x;
     if ((ft->type == NOTE) || (ft->type == CHORDNOTE)) {
-      n = ft->item;
+      n = ft->item.voidptr;
       y1 = (double)(n->y * TONE_HT);
+      stemup = n->stemup;
     } else {
       if (ft->type == REST) {
-        r = ft->item;
+        r = ft->item.voidptr;
         y1 = (double)(4 * TONE_HT);
       } else {
         printf("Internal error: NOT A NOTE/REST (%d)in slur/tie\n" ,ft->type);
@@ -2845,7 +2953,7 @@ static void drawslurtie(struct slurtie* s)
       };
     };
   };
-  if (n->stemup) {
+  if (stemup) {
     fprintf(f, " %.1f %.1f %.1f %.1f slurdown\n", x0, y0, x1, y1); 
   } else {
     fprintf(f, " %.1f %.1f %.1f %.1f slurup\n", x0, y0, x1, y1); 
@@ -2861,6 +2969,7 @@ static void close_slurtie(struct slurtie* s)
   struct feature* ft;
   struct note* n;
   struct rest* r;
+  int stemup = 0;
 
   if ((s == NULL) || (s->crossline == 0)) {
     return;
@@ -2873,11 +2982,12 @@ static void close_slurtie(struct slurtie* s)
     };
     x1 = ft->x;
     if ((ft->type == NOTE) || (ft->type == CHORDNOTE)) {
-      n = ft->item;
+      n = ft->item.voidptr;
       y1 = (double)(n->y * TONE_HT);
+      stemup = n->stemup;
     } else {
       if (ft->type == REST) {
-        r = ft->item;
+        r = ft->item.voidptr;
         y1 = (double)(4 * TONE_HT);
       } else {
         printf("Internal error: NOT A NOTE/REST (%d)in slur/tie\n" ,ft->type);
@@ -2887,7 +2997,7 @@ static void close_slurtie(struct slurtie* s)
   };
   x0 = TREBLE_LEFT + TREBLE_RIGHT;
   y0 = y1;
-  if (n->stemup) {
+  if (stemup) {
     fprintf(f, " %.1f %.1f %.1f %.1f slurdown\n", x0, y0, x1, y1); 
   } else {
     fprintf(f, " %.1f %.1f %.1f %.1f slurup\n", x0, y0, x1, y1); 
@@ -2906,7 +3016,7 @@ static void blockline(struct voice* v, struct vertspacing** spacing)
     ft = ft->next;
   };
   if ((ft != NULL) && (ft->type == PRINTLINE)) {
-    *spacing = ft->item;
+    *spacing = ft->item.voidptr;
   } else {
     *spacing = NULL;
     event_error("Expecting line of music - possible voices mis-match");
@@ -2934,6 +3044,7 @@ static int printvoiceline(struct voice* v)
   struct feature* ft;
   struct note* anote;
   struct key* akey;
+  timesig_details_t *atimesig;
   char* astring;
   struct fract* afract;
   struct rest* arest;
@@ -2943,7 +3054,7 @@ static int printvoiceline(struct voice* v)
   struct chord* thischord;
   int chordcount;
   double xchord;
-  struct aclef* theclef;
+  cleftype_t* theclef;
   int printedline;
   double xend;
   int inend;
@@ -2958,19 +3069,21 @@ static int printvoiceline(struct voice* v)
           (v->place->type == LEFT_TEXT) || (v->place->type == CENTRE_TEXT) ||
           (v->place->type == VSKIP))) {
     if (v->place->type == LINENUM) {
-      lineno = (int)(v->place->item);
+      lineno = v->place->item.number;
     };
     if (v->place->type == NEWPAGE) {
       newpage();
     };
+    /* [JA] 2020-11-07 */
     if (v->place->type == LEFT_TEXT) {
-      printtext(left, v->place->item, &textfont);
+      printtext(left, v->place->item.voidptr, &textfont);
     };
     if (v->place->type == CENTRE_TEXT) {
-      printtext(centre, v->place->item, &textfont);
+      printtext(centre, v->place->item.voidptr, &textfont);
     };
+
     if (v->place->type == VSKIP) {
-      vskip((double)((int)v->place->item));
+      vskip((double)v->place->item.number);
     };
     v->place = v->place->next;
   };
@@ -3004,21 +3117,21 @@ static int printvoiceline(struct voice* v)
     switch (ft->type) {
     case SINGLE_BAR: 
       fprintf(f, "%.1f bar\n", ft->x);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       break;
     case DOUBLE_BAR: 
       fprintf(f, "%.1f dbar\n", ft->x);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       inend = endrep(inend, endstr, xend, ft->x, spacing->yend);
       break;
     case BAR_REP: 
       fprintf(f, "%.1f fbar1 %.1f rdots\n", ft->x, ft->x+10);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       inend = endrep(inend, endstr, xend, ft->x, spacing->yend);
       break;
     case REP_BAR: 
       fprintf(f, "%.1f rdots %.1f fbar2\n", ft->x, ft->x+10);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       inend = endrep(inend, endstr, xend, ft->x, spacing->yend);
       break;
     case REP1: 
@@ -3036,12 +3149,12 @@ static int printvoiceline(struct voice* v)
     case PLAY_ON_REP: 
       inend = endrep(inend, endstr, xend, ft->x - ft->xleft, spacing->yend);
       inend = 1;
-      strcpy(endstr, ft->item);
+      strcpy(endstr, ft->item.voidptr);
       xend = ft->x + ft->xright;
       break;
     case BAR1: 
       fprintf(f, "%.1f bar\n", ft->x);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       inend = endrep(inend, endstr, xend, ft->x - ft->xleft, spacing->yend);
       inend = 1;
       strcpy(endstr, "1");
@@ -3049,7 +3162,7 @@ static int printvoiceline(struct voice* v)
       break;
     case REP_BAR2: 
       fprintf(f, "%.1f rdots %.1f fbar2\n", ft->x, ft->x+10);
-      printbarnumber(ft->x, (int)ft->item);
+      printbarnumber(ft->x, ft->item.number);
       inend = endrep(inend, endstr, xend, ft->x - ft->xleft, spacing->yend);
       inend = 2;
       strcpy(endstr, "2");
@@ -3069,33 +3182,33 @@ static int printvoiceline(struct voice* v)
       inend = endrep(inend, endstr, xend, ft->x, spacing->yend);
       break;
     case PART: 
-      astring = ft->item;
+      astring = ft->item.voidptr;
       break;
     case TEMPO: 
-      draw_tempo(ft->x, spacing->yinstruct, ft->item);
+      draw_tempo(ft->x, spacing->yinstruct, ft->item.voidptr);
       break;
     case TIME: 
-      afract = ft->item;
-      if (afract==NULL) {
+      atimesig = ft->item.voidptr;
+      if (atimesig == NULL) {
         if (v->line == midline) {
-          draw_meter(&v->meter, ft->x);
-        };
+          draw_meter (&v->timesig, ft->x);
+        }
       } else {
-        setfract(&v->meter, afract->num, afract->denom);
+        copy_timesig(&v->timesig, atimesig);
         if (v->line == midline) {
-          draw_meter(afract, ft->x);
-        };
-      };
+          draw_meter (atimesig, ft->x);
+        }
+      }
       break;
     case KEY: 
-      akey = ft->item;
+      akey = ft->item.voidptr;
       if (v->line == midline) {
         draw_keysig(v->keysig->map, akey->map, akey->mult, ft->x, v->clef);
       };
       set_keysig(v->keysig, akey);
       break;
     case REST: 
-      arest = ft->item;
+      arest = ft->item.voidptr;
       drawrest(arest, ft->x, spacing);
       if (v->tuple_count > 0) {
         if (v->tuple_count == v->tuplenotes) {
@@ -3110,7 +3223,7 @@ static int printvoiceline(struct voice* v)
       };
       break;
     case TUPLE: 
-      atuple = ft->item;
+      atuple = ft->item.voidptr;
       if (atuple->beamed) {
         v->beamed_tuple_pending = atuple->n;
         v->tuplenotes = atuple->r;
@@ -3123,7 +3236,7 @@ static int printvoiceline(struct voice* v)
       };
       break;
     case NOTE: 
-      anote = ft->item;
+      anote = ft->item.voidptr;
       if (thischord == NULL) {
         if (ingrace) {
           drawgracenote(anote, ft->x, ft, thischord);
@@ -3158,7 +3271,7 @@ static int printvoiceline(struct voice* v)
       };
       break;
     case CHORDNOTE:
-      anote = ft->item;
+      anote = ft->item.voidptr;
       if (ingrace) {
         drawgracehead(anote, xchord, ft, nostem);
       } else {
@@ -3172,16 +3285,16 @@ static int printvoiceline(struct voice* v)
     case TEXT: 
       break;
     case SLUR_ON: 
-      drawslurtie(ft->item);
+      drawslurtie(ft->item.voidptr);
       break;
     case SLUR_OFF: 
-      close_slurtie(ft->item);
+      close_slurtie(ft->item.voidptr);
       break;
     case TIE: 
-      drawslurtie(ft->item);
+      drawslurtie(ft->item.voidptr);
       break;
     case CLOSE_TIE:
-      close_slurtie(ft->item);
+      close_slurtie(ft->item.voidptr);
       break;
     case TITLE: 
       break;
@@ -3210,7 +3323,7 @@ static int printvoiceline(struct voice* v)
     case VOICE: 
       break;
     case CHORDON: 
-      thischord = ft->item;
+      thischord = ft->item.voidptr;
       chordcount = 0;
       drawchordtail(thischord, ft->next->x);
       break;
@@ -3237,12 +3350,12 @@ static int printvoiceline(struct voice* v)
     case GT: 
       break;
     case DYNAMIC: 
-      psaction = ft->item;
+      psaction = ft->item.voidptr;
       if(psaction->color == 'r') redcolor = 1; /* [SS] 2013-11-04 */
       if(psaction->color == 'b') redcolor = 0;
       break;
     case LINENUM: 
-      lineno = (int)(ft->item);
+      lineno = ft->item.number;
       break;
     case MUSICLINE: 
       v->line = midline;
@@ -3258,15 +3371,16 @@ static int printvoiceline(struct voice* v)
       break;
     case WORDSTOP: 
       break;
+    case WORDEXTEND:
+      break;
     case INSTRUCTION:
       break;
     case NOBEAM:
       break;
     case CLEF:
-      theclef = ft->item;
+      theclef = ft->item.voidptr;
       if (theclef != NULL) {
-        v->clef->type = theclef->type;
-        v->clef->octave = theclef->octave;
+        copy_clef (v->clef, theclef);
       };
       if (v->line == midline) {
         printclef(v->clef, ft->x, ft->yup, ft->ydown);
@@ -3324,7 +3438,7 @@ static int finalsizeline(struct voice* v)
     ft = ft->next;
   };
   if ((ft != NULL) && (ft->type == PRINTLINE)) {
-    avertspacing = ft->item;
+    avertspacing =  ft->item.voidptr;
     avertspacing->height = (float) height;
     avertspacing->descender = (float) descender;
     avertspacing->yend = (float) yend;
@@ -3365,7 +3479,7 @@ static int getlineheight(struct voice* v, double* height)
           (v->place->type == LEFT_TEXT) || (v->place->type == CENTRE_TEXT) ||
           (v->place->type == VSKIP))) {
     if (v->place->type == LINENUM) {
-      lineno = (int)(v->place->item);
+      lineno = v->place->item.number;
     };
     if (v->place->type == LEFT_TEXT) {
       *height = *height + textfont.pointsize + textfont.space;
@@ -3374,7 +3488,7 @@ static int getlineheight(struct voice* v, double* height)
       *height = *height + textfont.pointsize + textfont.space;
     };
     if (v->place->type == VSKIP) {
-      *height = *height + (double)((int)v->place->item);
+      *height = *height + (double)(v->place->item.number);
     };
     v->place = v->place->next;
   };
@@ -3386,7 +3500,7 @@ static int getlineheight(struct voice* v, double* height)
     v->place = v->place->next;
   };
   if (v->place != NULL) {
-    spacing = v->place->item;
+    spacing = v->place->item.voidptr;
     *height = *height + spacing->height + spacing->descender;
     v->place = v->place->next;
   };
@@ -3503,7 +3617,12 @@ void printtune(struct tune* t)
       boundingbox.urx = xmargin + pagewidth;
       boundingbox.ury = ymargin + pagelen;
     };
-    sprintf(outputname, "%s%d.eps", outputroot, t->no);
+#ifdef NO_SNPRINTF
+    /* [SS] 2020-11-01 */
+    sprintf(outputname,  "%s%d.eps", outputroot, t->no); /* [JA] 2020-11-01 */
+#else
+    snprintf(outputname, MAX_OUTPUTNAME, "%s%d.eps", outputroot, t->no); /* [JA] 2020-11-01 */
+#endif
     open_output_file(outputname, &boundingbox);
   } else {
     make_open();
@@ -3566,9 +3685,8 @@ void printtune(struct tune* t)
   /* musicsetup(); */
   thisvoice = firstitem(&t->voices);
   while (thisvoice != NULL) {
-    thisvoice->clef->type = t->clef.type;
-    thisvoice->clef->octave = t->clef.octave;
-    setfract(&thisvoice->meter, t->meter.num, t->meter.denom);
+    copy_clef (thisvoice->clef, &t->clef);
+    copy_timesig(&thisvoice->timesig, &t->timesig);
     thisvoice->place = thisvoice->first;
     thisvoice = nextitem(&t->voices);
   };

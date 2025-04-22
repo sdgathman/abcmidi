@@ -31,7 +31,10 @@
 /* for Microsoft Visual C++ Ver 6 and higher */
 #ifdef _MSC_VER
 #define ANSILIBS
+#define snprintf _snprintf
+#define strncasecmp strnicmp
 #endif
+
 
 #include "abc.h"
 #include "parseabc.h"
@@ -286,7 +289,7 @@ char *featname[] = {
 "CHORDOFF", "CHORDOFFEX", "DRUMON", "DRUMOFF",
 "DRONEON", "DRONEOFF", "SLUR_TIE", "TNOTE",
 "LT", "GT", "DYNAMIC", "LINENUM",
-"MUSICLINE", "MUSICSTOP", "WORDLINE", "WORDSTOP",
+"MUSICLINE", "MUSICSTOP", "WORDLINE", "WORDSTOP", "WORDEXTEND",
 "INSTRUCTION", "NOBEAM", "CHORDNOTE", "CLEF",
 "PRINTLINE", "NEWPAGE", "LEFT_TEXT", "CENTRE_TEXT",
 "VSKIP", "COPYRIGHT", "COMPOSER", "ARPEGGIO",
@@ -355,7 +358,9 @@ void configure_gchord()
 {
  int j;
  int inchord, note;
+
  gchordnotes_size = 0;
+ if (chordnum < 0) return; /* [SS] 2022-03-20 */
 
 inchord = 0;
 if (inversion != -1) {
@@ -398,7 +403,8 @@ char* s;
   p = s;
   j = 0;
   seq_len = 0;
-    while ((strchr("zcfbghijGHIJx", *p) != NULL) && (j <39)) {
+    /* [SS] 2021-12-10 */
+    while ((strchr("zcfbghijkGHIJKx", *p) != NULL) && (j <39)) {
     if (*p == 0) break;
     gchord_seq[j] = *p;
     p = p + 1;
@@ -518,7 +524,7 @@ int pass;
 {
   char msg[80];
   
-  if (barno >= 0 || barno < 1024) barloc[barno] = tracklen;
+  if (barno >= 0 && barno < 1024 && pass == 1) barloc[barno] = bar_num; /*[SS] 2021-04-26 */
   if (barchecking) {
     /* only generate these errors once */
     if (noteson && (partrepno == 0)) {
@@ -530,7 +536,7 @@ int pass;
         if (bar_denom != 1) {
           sprintf(msg+strlen(msg), "/%d", bar_denom);
         };
-        sprintf(msg+strlen(msg), " units instead of %d", barsize);
+        sprintf(msg+strlen(msg), " time units while the time signature has %d", barsize);
         if (pass == 2) {
           strcat(msg, " in repeat");
         };
@@ -806,25 +812,50 @@ int track;
      
   while ((j < notes) && (done > 0))
   {
-     j = j+1;
      if (feature[j] == TITLE) {
         if (track != 2)
            mf_write_meta_event(0L, sequence_name, atext[pitch[j]], strlen (atext[pitch[j]]));
-        strcpy(atitle+2, atext[pitch[j]]);
+        strncpy(atitle+2, atext[pitch[j]], 197); /* [KG] 2022-01-13 stack overflow bug */
         text_data(atitle);
         done--;
      }
      if (feature[j] == COMPOSER) {
-        strcpy(atitle+2, atext[pitch[j]]);
+        strncpy(atitle+2, atext[pitch[j]], 197); /* [KG] 2022-01-13 stack overflow bug */
         text_data(atitle);
         done--;
      }     
      if (feature[j] == COPYRIGHT) {
-        strcpy(atitle+2, atext[pitch[j]]);
+        strcpy(atitle+2, atext[pitch[j]]); /* [KG] 2022-01-13 stack overflow bug */
         text_data(atitle);
         done--;
      }
+     j = j+1;
   }
+}
+
+/* [JA] 2022.06.14 */
+/* scan ahead to see if a WORDSTOP is cancelled by a subsequent WORDEXTEND */
+static int check_wordextend(int startplace)
+{
+  int place;
+  int result;
+  int this_feature;
+
+  place = startplace;
+  result = 0;
+  while ((result == 0) && (place < notes)  ) {
+    this_feature = feature[place];
+    if (this_feature == WORDEXTEND) {
+      return 1;
+    }
+    /* we should stop searching if we find any of these */
+    if ((this_feature == WORDLINE) || (this_feature == PART) ||
+        (this_feature == VOICE) || (this_feature == MUSICLINE)) {
+      return 0;
+    }
+    place = place + 1;
+  }
+  return 0;
 }
 
 static int findwline(startline)
@@ -869,14 +900,27 @@ int startline;
         };
         break;
       case WORDSTOP:
-        if (inwline) {
-          versecount = versecount + 1;
-        };
-        inwline = 0;
-        /* stop if we are part-way through a lyric set */
-        if  (extending) {
-          done = 1;
-        };
+        /* [JA] 2022-06-14 */
+        /* WORDSTOP marks the end of a w: field (i.e. no continuation).
+         * if it is followed by WORDEXTEND (indicating w: + or +:) then
+         * we over-ride it.
+         */
+        if (!check_wordextend(place)) {
+          if (inwline) {
+            versecount = versecount + 1;
+          };
+          inwline = 0;
+          /* stop if we are part-way through a lyric set */
+          if  (extending) {
+            done = 1;
+          };
+        }
+        break;
+      case WORDEXTEND:
+        /* don't need to do anything with WORDEXTEND here as we search
+         * foward for it when we find WORDSTOP
+         * [JA] 2022-06-14
+         */
         break;
       case PART:
         done = 1;
@@ -965,7 +1009,8 @@ int w;
   syllstatus = empty;
   c = *(words[w]+(*place));
   isBig5 = 0;  /* [BI] 2012-10-03 */
-  while ((syllstatus != postword) && (syllstatus != failed)) {
+  while ((syllstatus != postword) && (syllstatus != failed) && (i<199)) {
+  /* [KG] 2022-01-13 stack overflow bug fix */
   syllable[i] = c;
     /* printf("syllstatus = %d c = %c i = %d place = %d row= %d \n",syllstatus,c,i,*place,w); */
 	if (isBig5) { /* [BI] 2012-10-03 */
@@ -1251,7 +1296,8 @@ int passno;
     found = 0;
     while ((found == 0) && (*p != '\0')) {
       if (!isdigit(*p)) {
-        sprintf(msg, "Bad variant list : %s", atext[pitch[place]]);
+        snprintf(msg, 100, "Bad variant list : %s", atext[pitch[place]]);
+/* [KG] 2022-01-13 stack overflow bug */
         event_error(msg);
         found = 1;
       };
@@ -1414,8 +1460,6 @@ static void midi_re_tune (int channel) {
    this is done.
 */
 char data[2];
-data[0] = (char) (bend & 0x7f); /* least significant bits */
-data[1] = (char) ((bend >>7) & 0x7f);
 /* indicate that we are applying RPN fine and gross tuning using
    the following two control commands. 
    control 101 0  
@@ -1437,6 +1481,29 @@ data[0] = 38; /* control data entry for fine bits */
 data[1] = (char) (bend & 0x7f); /* least significant bits */
 write_event(control_change, channel, data, 2);
 } 
+
+/* [SS] 2022-01-27 */
+static void midiPitchBendRange (int semis) {
+/* by default the pitch wheel maps 0 to 16383 to a range of 4
+ * semitones. This function uses the RPN control command to
+ * expand the range to semis semitones.
+ */ 
+char data[2];
+/* indicate that we are applying RPN fine and gross tuning using
+   the following two control commands. 
+   control 101 0  
+   control 100 0 */
+data[0] = 101; /* RPN command */
+data[1] = 0;   /* type of command */
+write_event(control_change, channel, data, 2);
+data[0] = 6; /* contains most significant byte */
+data[1] = semis;
+write_event(control_change, channel, data, 2);
+data[0] = 38; /* contains least significant byte (range in cents) */
+data[1] = 0;
+write_event(control_change, channel, data, 2);
+}
+
 
 
 
@@ -1875,6 +1942,39 @@ if (remainder == 0) {
  reduce(val_num,val_den);
 }
 
+/* [SS] 2020-08-09 */
+static void expand_array (shortarray, size, longarray, factor)
+/* if shortarray = {21,-40} and factor = 4
+ * longarray will be {5,6,5,5,-10,-10,-10,-10}
+ * It is used for smoothing a bendstring.
+ */
+int shortarray[], longarray[];
+int size;
+int factor;
+{
+float increment, accumulator;
+float last_accumulator;
+int i,j,k;
+if (size*factor > 256) {printf("not enough room in bendstring\n");
+	                return;
+                       }
+j = 0;
+for (i = 0; i< size; i++) {
+  increment = (float) shortarray[i]/factor;
+  accumulator = 0.0;
+  last_accumulator = 0.0;
+  for (k = 0; k < factor; k++) {
+    accumulator += increment;
+    if (increment > 0)
+      longarray[j] = (int) (accumulator + 0.5) - (int) (last_accumulator + 0.5);
+    else 
+      longarray[j] = (int) (accumulator - 0.5) - (int) (last_accumulator - 0.5);
+    last_accumulator = accumulator;
+    j++;
+    }
+  }
+}
+
 
 static void dodeferred(s,noteson)
 /* handle package-specific command which has been held over to be */
@@ -1888,6 +1988,7 @@ int noteson;
   int done;
   int val;
   int i;
+  int bendinput[64]; /* [SS] 2020-08-09 */
 
   p = s;
   skipspace(&p);
@@ -2013,14 +2114,17 @@ int noteson;
     skipspace(&p);
     val = readsnump(&p);
     bendacceleration = val;
+    skipspace(&p); /* [SS] 2022-02-13 */
+    val = readsnump(&p);
+    if (val > 0 && val < 100) bendnvals = val; 
+    else bendnvals = 8;
+
     /* [SS] 2015-08-11 */
-    bendnvals = 0;
     if (bendvelocity != 0 || bendacceleration != 0) {
-        for (i = 0; i<8; i++) {
+        for (i = 0; i<bendnvals; i++) {  /* [SS] 2022-02-13 */
             benddata[i] = bendvelocity;
             bendvelocity = bendvelocity + bendacceleration;
             }
-        bendnvals = 8;
         }
     /*bendtype = 1; [SS] 2015-08-11 */
     if (bendnvals == 1) bendtype = 3; /* [SS] 2014-09-22 */
@@ -2044,6 +2148,29 @@ int noteson;
      else bendtype = 2;
      }
 
+  /* [SS] 2014-09-10 */
+  else if (strcmp(command, "bendstringex") == 0) {
+     i = 0;
+     while (i<64) { /* [SS] 2020-08-09 2015-09-10 2015-10-03 */
+          bendinput[i] = readsnump(&p);
+          skipspace(&p);
+          i = i + 1;
+          if (*p == 0) break;
+        };
+     expand_array (bendinput, i, benddata, 4);
+     bendnvals = i*4;
+     done = 1;
+     if (bendnvals == 1) bendtype = 3;
+     else bendtype = 2;
+     }
+
+  /* [SS] 2022-01-27 */
+  else if (strcmp(command, "pitchbendrange") == 0) {
+     int semis;
+     semis = readsnump(&p);
+     midiPitchBendRange(semis);
+     done = 1;
+     }
 
 
   else if (strcmp(command, "drone") == 0) {
@@ -2340,6 +2467,7 @@ int j;
     if ((chordnum == -1) && (action == 'c')) {
       action = 'f';
     };
+    if (gchords) /* [SS] 2021-06-27 */
     switch (action) {
 
     case 'z':
@@ -2362,8 +2490,9 @@ int j;
         save_note(g_num*len, g_denom, basepitch+fun.base, 8192, fun.chan, fun.vel);
         else
         save_note(g_num*len, g_denom, inversion+fun.base, 8192, fun.chan, fun.vel);
-      };
-/* There is no break here so the switch statement continues into the next case 'c' */ 
+        }
+      /* break;  * [SS] 2021-06-27 2021-09-15 */
+/* There should not be a break here so the switch statement continues into the next case 'c' */ 
 
     case 'c':
       /* do chord with handling of any 'inversion' note */
@@ -2402,6 +2531,13 @@ int j;
         save_note(g_num*len, g_denom, gchordnotes[gchordnotes_size], 8192, gchord.chan, gchord.vel); 
       break;
 
+    /* [SS] 2021-12-10 */
+    case 'k':
+      if(gchordnotes_size >4 && g_started && gchords)
+        save_note(g_num*len, g_denom, gchordnotes[4], 8192, gchord.chan, gchord.vel); 
+      else /* [SS] 2016-01-03 */
+        save_note(g_num*len, g_denom, gchordnotes[gchordnotes_size], 8192, gchord.chan, gchord.vel); 
+
     case 'G':
       if(gchordnotes_size>0 && g_started && gchords)
         save_note(g_num*len, g_denom, gchordnotes[0]-12, 8192, gchord.chan, gchord.vel); 
@@ -2426,6 +2562,14 @@ int j;
     case 'J':
       if(gchordnotes_size >3 && g_started && gchords)
         save_note(g_num*len, g_denom, gchordnotes[3]-12, 8192, gchord.chan, gchord.vel); 
+      else /* [SS] 2016-01-03 */
+        save_note(g_num*len, g_denom, gchordnotes[gchordnotes_size], 8192, gchord.chan, gchord.vel); 
+      break;
+
+    /* [SS] 2021-12-10 */
+    case 'K':
+      if(gchordnotes_size >3 && g_started && gchords)
+        save_note(g_num*len, g_denom, gchordnotes[4]-12, 8192, gchord.chan, gchord.vel); 
       else /* [SS] 2016-01-03 */
         save_note(g_num*len, g_denom, gchordnotes[gchordnotes_size], 8192, gchord.chan, gchord.vel); 
       break;
@@ -3478,7 +3622,7 @@ void dump_barloc (FILE *diaghandle, int trkno)
 int i;
 fprintf(diaghandle,"track = %d voice = %d type = %d number of bars = %d\n",trkno,trackdescriptor[trkno].voicenum,trackdescriptor[trkno].tracktype,barno);
 for (i=0;i<barno;i++) {
-  fprintf(diaghandle,"%6.2f\t",(double) barloc[i]/480.0);
+  fprintf(diaghandle,"%6.2f\t",(double) barloc[i]); /* [SS] 2021-04-26 */
   if (i%8 == 7) fprintf(diaghandle,"\n");
   }
 fprintf(diaghandle,"\n");

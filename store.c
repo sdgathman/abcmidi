@@ -93,6 +93,7 @@ void read_spec()
 void event_part()
 void event_voice()
 void event_length()
+void event_default_length()
 void tempounits()
 int get_tempo_from_name()
 void event_tempo()
@@ -183,9 +184,9 @@ int main()
 
 
 
- */
+*/
 
-#define VERSION "4.38 July 05 2020 abc2midi" 
+#define VERSION "4.76 August 01 2022 abc2midi" 
 
 /* enables reading V: indication in header */
 #define XTEN1 1
@@ -272,15 +273,14 @@ extern int microtone;
 extern int temperament;  /* [SS] 2020-06-25 */
 /* [HL] 2020-07-03 */
 float temperament_dt[12]={0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0};
-#define SEMISIZE 4096
 #define TEMPERDT -1
 #define TEMPEREQ 1
 #define TEMPERLN 2
 #define TEMPERNORMAL 0
-int octave_size = 12*SEMISIZE;
-int fifth_size = 7*SEMISIZE; /* default to 12-edo */
-int sharp_size = SEMISIZE; /* [HL] 2015-05-15] */
-int microstep_size = SEMISIZE; /* [HL] 2020-06-20 */
+float octave_size = 12.0; /* [SS] 2020-07-17 */
+float fifth_size = 7.0; /* default to 12-edo */
+float sharp_size = 1.0; /* [SS] 2020-07-17 */
+float microstep_size = 1.0; /* [SS] 2020-07-17 */
 int started_parsing=0;
 int v1index= -1;
 int ignore_fermata = 0; /* [SS] 2010-01-06 */
@@ -893,6 +893,10 @@ char **filename;
   } else {
     check = 0;
   };
+  /* disable repeat checking because abc2midi does its own workaround
+   * attempting to fix various repeat errors.
+   */
+  repcheck = 0;
   /* look for filename-from-tune-titles option */
   namelimit = 252;
   titlenames = 0;
@@ -1788,6 +1792,11 @@ void event_linebreak()
   addfeature(LINENUM, lineno, 0, 0);
 }
 
+/* a score linebreak character has been encountered */
+void event_score_linebreak(char ch)
+{
+}
+
 void event_startmusicline()
 /* starting to parse line of abc music */
 {
@@ -1851,7 +1860,7 @@ nmidicmd++;
 /* [SS] 2015-06-01 For converting the %%MIDIx command to a
    %%MIDI command
 */
-void event_midi();
+void event_midi(char* s);  /* [SS] 2022-03-19 */
 
 
 void process_midix(s)
@@ -1887,6 +1896,28 @@ while (j > 0) {
     event_midi(midicmd[i]); 
     if (strncmp(midicmd[i],"controlstring",12) == 0) k++;
     }
+}
+
+/* [SS] 2020-07-17 ; [HL] 2020-07-24 */
+float compute_fifth_size (octave_size, ndiv)
+float octave_size; /* in cents */
+int ndiv;
+/* rather than compute the fifth_size in cents directly
+ * we subtract the octave from the third harmonic.
+ * We do it this way  instead of the proportion 3/2 because the
+ * octave also can be tempered. When the octave is tempered, the factor 2
+ * in 3/2 might cause problems: mix of pure and tempered octaves!).
+ */
+{
+double x, h3;
+int n;
+float w;
+/* h3 (1901.955) is the 3rd harmonic (fifth+octave) represented in cents */
+h3 = 1200.0 * log (3.0)/log(2.0);  /* 1200 * log2(3.0) */
+x = h3 - octave_size;           /* fifth reduced by the tempered octave */
+n = (int) (0.5 + x * ndiv / octave_size);     /* fifth in integer steps */
+w = n * octave_size / ndiv;                   /* fifth quantized according to temperament */
+return w; /* in cents */
 }
 
 
@@ -2149,26 +2180,26 @@ char *s;
       double octave_cents=0.0;
       double fifth_cents=0.0;
       temperament = TEMPERLN;
-      middle_c = 60*SEMISIZE;
+      middle_c = 60;
 
       if (sscanf(p," %lf %lf ",&octave_cents,&fifth_cents) == 2) {
-        octave_size = (int)(octave_cents*SEMISIZE/100+0.5);
-        fifth_size = (int)(fifth_cents*SEMISIZE/100+0.5);
+        octave_size = octave_cents;
+        fifth_size = fifth_cents;
 	sharp_size = 7*fifth_size - 4*octave_size; /* [HL] 2015-05-15] */
         microstep_size = sharp_size;   /* [HL] 2020-06-20 */ 	
 	if(verbose) { /* [HL] 2015-05-15] */
 	    printf("temperamentlinear:\n"
 		   "\targs: %lf %lf\n",octave_cents, fifth_cents);
-	    printf("\toctave_size = %d (%.2lf cents)\n"
-		   "\tfifth_size = %d (%.2lf cents)\n"
-		   "\twhole-tone size = %d (%.2lf cents)\n"
-		   "\taccidental_size = %d (%.2lf cents)\n"
+	    printf("\toctave_size = %.3f (%.3lf cents)\n"
+		   "\tfifth_size = %.3f (%.3lf cents)\n"
+		   "\twhole-tone size = %.3f (%.3lf cents)\n"
+		   "\taccidental_size = %.3f (%.3lf cents)\n"
 		   ,
 		   octave_size,
-		   100.0*octave_size/SEMISIZE,
-		   fifth_size,100.0*fifth_size/SEMISIZE,
-		   2*fifth_size - octave_size, 100.0*(2.0*fifth_size-octave_size)/SEMISIZE,
-		   sharp_size,100.0*sharp_size/SEMISIZE
+		   octave_size,
+		   fifth_size,fifth_size,
+		   2*fifth_size - octave_size, 2.0*fifth_size-octave_size,
+		   sharp_size,sharp_size
 		   );
 	}
 
@@ -2182,72 +2213,70 @@ char *s;
   /* [HL] 2015-05-15 */
   else if (strcmp(command, "temperamentequal") == 0) {
       double octave_cents;
-      int acc_size = -1;  /* [SDG] 2020-06-03 */
+      float acc_size = -1.0;  /* [SDG] 2020-06-03 */
       int narg, ndiv, fifth_index, sharp_steps;
       narg = sscanf(p," %d %lf %d %d ",&ndiv, &octave_cents, &fifth_index, &sharp_steps);
       switch (narg) {
       case 1:
-	  octave_size = (int)( 1200.0 *SEMISIZE/100.0 + 0.5);
-	  fifth_size = (int)( 1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
-          /* [SS] 2015-10-08 extra parentheses after (int) */
-	  fifth_size = (int) (((int) (1.0* ndiv *fifth_size/octave_size + 0.5)) * (1.0*octave_size/ndiv));
+	  octave_size = 1200.0; /* [SS] 2020-07-17 */
+          fifth_size = compute_fifth_size (octave_size, ndiv);
 	  acc_size = 7*fifth_size - 4*octave_size;
 	  break;
       case 2:
-	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
-	  fifth_size = (int) (1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
-          /* [SS] 2015-10-08 extra parentheses after (int) */
-	  fifth_size = (int) (((int)( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv));
+	  octave_size = octave_cents;
+          fifth_size = compute_fifth_size (octave_size, ndiv);
 	  acc_size = 7*fifth_size - 4*octave_size;
 	  break;
       case 3:
-	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
-	  if (fifth_index > 0) /* user-defined fifth size */
-	      fifth_size = (int) ( 1.0 * fifth_index * octave_size/ndiv + 0.5);
+	  octave_size = octave_cents;
+	  if (fifth_index > 0.0) /* user-defined fifth size */
+	      fifth_size =  1.0 * fifth_index * octave_size/ndiv ;
 	  else {               /* automatically computed fifth size */
-	      fifth_size = ((int) (1901.95500086539 *SEMISIZE/100.0 + 0.5)) - octave_size;
-	      fifth_size = (int) (((int) ( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv));
-	  }
+              fifth_size = compute_fifth_size (octave_size, ndiv);
+	      }
 	  acc_size = 7*fifth_size - 4*octave_size;
 	  break;
       case 4:
-	  octave_size = (int)(octave_cents * SEMISIZE/100.0 + 0.5);
-	  if (fifth_index > 0) /* user-defined fifth size */
-	      fifth_size = (int) ( 1.0 * fifth_index * octave_size/ndiv + 0.5);
+	  octave_size = octave_cents;
+	  if (fifth_index > 0.0) /* user-defined fifth size */
+	      fifth_size =  1.0 * fifth_index * octave_size/ndiv ;
 	  else {               /* automatically computed fifth size */
-	      fifth_size = (int) (1901.95500086539 *SEMISIZE/100.0 + 0.5) - octave_size;
-          /* [SS] 2015-10-08 extra parentheses after (int) */
-	      fifth_size = (int) (((int) ( 1.0 * fifth_size/octave_size*ndiv + 0.5 )) * (1.0*octave_size/ndiv));
+              fifth_size = compute_fifth_size (octave_size, ndiv);
 	  }
 	  /* user-defined accidental size */
-	  acc_size = (int) (1.0 * sharp_steps * octave_size/ndiv + 0.5);
+	  acc_size = sharp_steps * octave_size/ndiv ;
 	  break;
       default:
 	  event_error("Bad format for temperamentequal command");
       }
-      microstep_size = (int) 1.0 * octave_size/ndiv + 0.5; /* [HL] 2020-06-20 */
+      microstep_size =  octave_size/ndiv; /* [SS] 2020-07-17 */
  
       sharp_size = acc_size;
 
       if(verbose) {
-	  printf("temperamentequal:\n"
-		 "\targs (%d): %d %lf %d %d\n",narg, ndiv, octave_cents, fifth_index, sharp_steps);
+	  printf("temperamentequal:\n\targs (%d):",narg);
+	  if(narg>=1) printf(" %d",ndiv);
+	  if(narg>=2) printf(" %.3lf",octave_cents);
+	  if(narg>=3) printf(" %d",fifth_index);
+	  if(narg>=4) printf(" %d",sharp_steps);
+	  printf("\n");
+
 	  printf("\tndiv = %d\n"
-		 "\toctave_size = %d (%.2lf cents)\n"
-		 "\tfifth_size = %d (%.2lf cents) (%d steps)\n"
-		 "\twhole-tone size = %d (%.2lf cents) (%d steps)\n"
-		 "\taccidental_size = %d (%.2lf cents) (%d steps)\n"
+		 "\toctave_size = %.3lf cents\n"
+		 "\tfifth_size = %.3lf (%d steps)\n"
+		 "\twhole-tone size = %.3lf (%d steps)\n"
+		 "\taccidental_size = %.3lf (%d steps)\n"
 		 ,
-		 ndiv,octave_size,
-		 100.0*octave_size/SEMISIZE,
-		 fifth_size,100.0*fifth_size/SEMISIZE,
-		 (int)(1.0*fifth_size/octave_size*ndiv+0.5),
-		 2*fifth_size - octave_size, 100.0*(2.0*fifth_size-octave_size)/SEMISIZE,
-		 (int)(1.0*(2*fifth_size-octave_size)/octave_size*ndiv+0.5),
-		 acc_size,100.0*acc_size/SEMISIZE,
-		 (int)(1.0*acc_size/octave_size*ndiv+0.5)
+		 ndiv,
+		 octave_size,
+		 fifth_size,
+		 (int) ((fifth_size/octave_size*ndiv) + 0.5),
+		 2.0*fifth_size-octave_size,
+		 (int) (((2*fifth_size-octave_size)*ndiv/octave_size) + 0.5),
+		 acc_size,
+		 (int) ((acc_size*ndiv/octave_size) + 0.5)
 		 );
-	         printf("\tmicrostep_size = %d (%.2lf cents)\n",microstep_size, 100.0*microstep_size/SEMISIZE); /* [HL] 2020-06-20*/
+	         printf("\tmicrostep_size = %.3lf cents (1 step)\n",microstep_size); /* [HL] 2020-06-20*/
 
       }
       
@@ -2261,7 +2290,7 @@ char *s;
       
 
       temperament = TEMPEREQ;
-      middle_c = 60*SEMISIZE;
+      middle_c = 60;
       done = 1;
     }
 
@@ -2274,11 +2303,11 @@ char *s;
 
 
   else if (strcmp(command,"drumon") == 0 && dotune) {  /* [SS] 2010-05-26 */
+      if (v == NULL) event_fatal_error("%%MIDI drumon must occur after the first K: header");
       addfeature(DRUMON, 0, 0, 0);
       v->hasdrums = 1;
       drumvoice = v->indexno; /* [SS] 2010-02-09 */
       done = 1;
-      if (v == NULL) event_error("%%MIDI drumon must occur after the first K: header");
     }
     if (strcmp(command,"drumoff") == 0) {
        addfeature(DRUMOFF, 0, 0, 0);
@@ -2702,9 +2731,11 @@ char *f;
   };
 }
 
-void event_words(p, continuation)
+/* [JA] 2022.06.14 */
+void event_words(p, append, continuation)
 /* handles a w: field in the abc */
 char* p;
+int append;
 int continuation;
 {
 
@@ -2716,6 +2747,9 @@ int continuation;
   v->haswords = 1;
   wordvoice = v->indexno;
   words[wcount] = addstring(p);
+  if ((append == PLUS_FIELD) || (append == W_PLUS_FIELD)) {
+    addfeature(WORDEXTEND, 0, 0, 0);
+  };
   addfeature(WORDLINE, wcount, 0, 0);
   if (continuation == 0) {
     addfeature(WORDSTOP, 0, 0, 0);
@@ -2944,6 +2978,10 @@ struct voice_params *vp;
     addfeature(VOICE, v->indexno, 0, 0); 
     
     dependent_voice[v->indexno] = 0;
+    if (vp->gotclef)
+    {
+      event_octave(vp->new_clef.octave_offset, 1);
+    }
     if (vp->gotoctave) {
       event_octave(vp->octave,1);
     };
@@ -2964,6 +3002,12 @@ int n;
   } else {
     global.default_length = n;
   };
+}
+
+void event_default_length (n)
+/* handles a missing L: field in the abc */
+     int n;
+{
 }
 
 static void tempounits(t_num, t_denom)
@@ -3052,31 +3096,38 @@ char *post;
   };
 }
 
-void event_timesig(n, m, dochecking)
+void event_timesig (timesig)
 /* handles an M: field  M:n/m */
-int n, m, dochecking;
+  timesig_details_t *timesig;
 {
+  int dochecking;
+
+  if (timesig->type == TIMESIG_FREE_METER) {
+    dochecking = 0;
+  } else {
+    dochecking = 1;
+  }
   if (dotune) {
     if (pastheader) {
-      addfeature(TIME, dochecking, n, m);
-      mtime_num = n; /* [SS] 2012-11-03 */
-      mtime_denom = m; /* [SS] 2012-11-03 */
+      addfeature (TIME, dochecking, timesig->num, timesig->denom);
+      mtime_num = timesig->num;            /* [SS] 2012-11-03 */
+      mtime_denom = timesig->denom;          /* [SS] 2012-11-03 */
       if (v != NULL) {
-        v->active_meter_num =  n; /* [SS] 2012-11-08 */
-        v->active_meter_denom =  m; /* [SS] 2012-11-08 */
-        }
+        v->active_meter_num = timesig->num; /* [SS] 2012-11-08 */
+        v->active_meter_denom = timesig->denom; /* [SS] 2012-11-08 */
+      }
     } else {
-      time_num = n;
-      time_denom = m;
-      mtime_num = n; /* [SS] 2012-11-03 */
-      mtime_denom = m; /* [SS] 2012-11-03 */
+      time_num = timesig->num;
+      time_denom = timesig->denom;
+      mtime_num = timesig->num;            /* [SS] 2012-11-03 */
+      mtime_denom = timesig->denom;          /* [SS] 2012-11-03 */
 
       /* [SS] 2015-03-11                                */
       /*if (v != NULL) {                                */
       /*  v->active_meter_num =  n;  [SS] 2012-11-08    */
       /*  v->active_meter_denom =  m;  [SS] 2012-11-08  */
       /*  }                                             */
-      meter_voice_update(n,m); /* [SS] 2015-03-11 */
+      meter_voice_update (timesig->num, timesig->denom); /* [SS] 2015-03-11 */
       timesigset = 1;
       barchecking = dochecking;
     };
@@ -3125,7 +3176,8 @@ char* value;
   else if (is_abcm2ps_option (key)) return;
 
   else {
-    sprintf(errmsg,"I: key \' %s\' not recognized", key);
+    /* [KG] 2022-01-13 stack overflow */
+    snprintf(errmsg, 80, "I: key \' %s\' not recognized", key);
     if (quiet == -1 && silent == 0) event_error(errmsg); /* [SS] 2018-04-01 */
     }
 }
@@ -3677,23 +3729,24 @@ int *pitchbend;
   int p;
   char acc;
   int mul, noteno;
-  int pitch4096,pitch,bend;
+  float pitchvalue;
+  int pitch,bend;
   int a,b;
   int j;
 
   static int scale[7] = {0, 2, 4, 5, 7, 9, 11};
-  const int accidental_size = sharp_size;  /* [HL] 2015-05-15 - for temperamentlinear and temperamentequal */
-  const int tscale[7] = {
+  const float accidental_size = sharp_size/100.0;  /* [HL] 2015-05-15 - for temperamentlinear and temperamentequal */
+  const float tscale[7] = {
     0,
-    2*fifth_size-octave_size,
-    4*fifth_size-2*octave_size,
-    -1*fifth_size+octave_size,
+    (2*fifth_size-octave_size),
+    (4*fifth_size-2*octave_size),
+    (-1*fifth_size+octave_size),
     fifth_size,
-    3*fifth_size-octave_size,
-    5*fifth_size-2*octave_size
-  };
-  static const char *anoctave = "cdefgab";
+    (3*fifth_size-octave_size),
+    (5*fifth_size-2*octave_size) };
+  /* in units cents  [SS] 2020-07-17 */
 
+  static const char *anoctave = "cdefgab";
   acc = accidental;
   mul = mult;
   noteno = (int)note - 'a';
@@ -3730,29 +3783,29 @@ int *pitchbend;
   /* [HL] 2020-07-03 */
   if ((temperament==TEMPERLN) || (temperament==TEMPEREQ))  {
  
-    p = tscale[p];
-    if (acc == '^') p = p + mul*accidental_size;
-    if (acc == '_') p = p - mul*accidental_size;
+    pitchvalue = tscale[p]/100.0; /* cents to semitones */
+    if (acc == '^') pitchvalue = pitchvalue + mul*accidental_size;
+    if (acc == '_') pitchvalue = pitchvalue - mul*accidental_size;
 
-    pitch4096 =  p + octave*octave_size + middle_c;
+    pitchvalue =  pitchvalue + octave*octave_size/100.0 + middle_c;
     
     /* [HL] 2020-06-27 Adjust for A=440.0 with zero pitchbend */
-    pitch4096 += (9*SEMISIZE) - (3*fifth_size-octave_size);
+    pitchvalue += 9.0 - (3.0*fifth_size-octave_size)/100.0;
 
     /* [HL] 2015-05-15 */
     if (microtone) {
 	if (setmicrotone.denom == 100) /* microtone in cents */ 
-	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * SEMISIZE);
+	  pitchvalue+=  setmicrotone.num / 100.0; /* [HL] 2020-07-28 */
         else if (setmicrotone.denom == 0) { /* [HL] 2020-06-20 / 2020-06-27 */
             /* microstep_size is accidental_size for temperamentlinear,
              * or
              * microstep_size is the octave fraction for temperamentequal
              * */
-           pitch4096 += (int) (1.0 * setmicrotone.num * microstep_size);
+           pitchvalue +=  setmicrotone.num * microstep_size/100.0;
        }
 
 	else /* microtone relative to sharp step in the current temperament */
-	    pitch4096 += (int) (1.0 * setmicrotone.num / setmicrotone.denom * accidental_size);
+	  pitchvalue +=  (((float)setmicrotone.num) / ((float)setmicrotone.denom)) * accidental_size; /* [HL] 2020-07-28 */
 
 	/* needed? */
 	microtone = 0;
@@ -3760,8 +3813,8 @@ int *pitchbend;
 	active_pitchbend = 8192;
     }
  
-    pitch =  (SEMISIZE*128+pitch4096+SEMISIZE/2)/SEMISIZE-128;
-    bend =  8192+4096*(pitch4096 - pitch*SEMISIZE)/SEMISIZE;
+    pitch =  (int) (pitchvalue + 0.5);
+    bend = (int) (0.5 + 8192.0 + 4096.0 * (pitchvalue - (float) pitch));
     bend = bend<0?0:(bend>16383?16383:bend);
    } else { /* TEMPERNORMAL / TEMPERDT */
     p = scale[p];
@@ -3770,7 +3823,7 @@ int *pitchbend;
     pitch = p + 12*octave + middle_c;
     bend = 8192; /* corresponds to zero bend */
     if (temperament == TEMPERDT) {  /* [HL] 2020-07-03 */
-	bend += (int) (SEMISIZE * temperament_dt[p] / 100.0);
+      bend += (int) (0.5 + 40.96 * temperament_dt[p]);
 	bend = bend<0?0:(bend>16383?16383:bend);
     }
    }
@@ -4233,9 +4286,10 @@ int num, denom;
   };
 }
 
-void event_note(decorators, accidental, mult, note, xoctave, n, m)
+void event_note(decorators, clef, accidental, mult, note, xoctave, n, m)
 /* handles a note in the abc */
 int decorators[DECSIZE];
+cleftype_t *clef; /* [JA] 2020-10-19 */
 int mult;
 char accidental, note;
 int xoctave, n, m;
@@ -4243,7 +4297,7 @@ int xoctave, n, m;
   int num, denom;
   int octave;
   int pitch;
-  int pitch_noacc;
+  int pitch_noacc = 0;
   int dummy;
 
   decotype[notes] = 0; /* [SS] 2012-07-02 no decoration */
@@ -4252,7 +4306,11 @@ int xoctave, n, m;
     event_fatal_error("Internal error - no voice allocated");
   };
   if (gracenotes && ignore_gracenotes) return; /* [SS] 2010-01-08 */
-  octave = xoctave + v->octaveshift;
+  if (v->octaveshift == 0) {  /* [JA] 2021-05-21 */
+    octave = xoctave + clef->octave_offset;
+  } else {
+    octave = xoctave + v->octaveshift;
+  }
   num = n;
   denom = m;
   if (v->inchord) v->chordcount = v->chordcount + 1;
@@ -4442,13 +4500,15 @@ void event_handle_gchord(s)
 char* s;
 {
   int basepitch;
-  char accidental, note;
+  char accidental, accidental2, note; /* [SS] 2021-12-05 */
   char* p;
   char name[9];
   int i;
   int chordno;
   int bassnote;
   int inversion;
+  int mult;  /* [SS] 2021-12-05 */
+  mult = 1;
 
   if (ignore_guitarchords == 1) return; /* [SS] 2019-12-09 */
   if ((*s >= '0') && (*s <= '5')) {
@@ -4475,7 +4535,9 @@ char* s;
     };
   };
   p = get_accidental(p, &accidental);
-  basepitch = pitchof(note, accidental, 1, 0, 0) - middle_c;
+  p = get_accidental(p, &accidental2); /* [SS] 2021-12-05 */
+  if (accidental2 != '=') mult = 2;  /* [SS] 2021-12-05 */
+  basepitch = pitchof(note, accidental, mult, 0, 0) - middle_c;
   i = 0;
   while ((i<9) && (*p != ' ') && (*p != '\0') && (*p != '(')
                && (*p != '/') && (*p != ')')) {
@@ -4491,12 +4553,16 @@ char* s;
       note = (int)*p - 'A' + 'a';
       p = p + 1;
       p = get_accidental(p, &accidental);
-      inversion = pitchof(note, accidental, 1, 0, 0) - middle_c;
+      p = get_accidental(p, &accidental2); /* [SS] 2021-12-05 */
+      if (accidental2 != '=') mult = 2;  /* [SS] 2021-12-05 */
+      inversion = pitchof(note, accidental, mult, 0, 0) - middle_c;
     } else if ((*p >= 'a') && (*p <= 'g')) {
       note = (int)*p;
       p = p + 1;
       p = get_accidental(p, &accidental);
-      inversion = pitchof(note, accidental, 1, 0, 0) - middle_c;
+      p = get_accidental(p, &accidental2); /* [SS] 2021-12-05 */
+      if (accidental2 != '=') mult = 2;  /* [SS] 2021-12-05 */
+      inversion = pitchof(note, accidental, mult, 0, 0) - middle_c;
     } else if (!silent) {
       event_error(" / must be followed by A-G or a-g in gchord");
     };
@@ -4659,8 +4725,36 @@ if (nofnop == 0) {
    done = 1;
   };
 
+/* The following instructions were added to avoid numerous
+   warnings if they appear in the abc file (in particular the
+   files derived from Craig Sapp's kern files using hum2abc).
+   Though most of these instructions are part of the abc
+   2.2 standard, I have yet to implement them.
+*/
+
+ if (strcmp(s,"accent") == 0) { /* [SS] 2021-01-24 */
+   done = 1;
+   };
+
+ if (strcmp(s,"mordent") == 0) { /* [SS] 2021-01-24 */
+   done = 1;
+   };
+
+ if (strcmp(s,"sfz") == 0) { /* [SS] 2021-01-24 */
+   done = 1;
+   };
+
+ if (strcmp(s,"wedge") == 0) { /* [SS] 2021-01-24 */
+   done = 1;
+   };
+
+ if (strcmp(s,"turn") == 0) { /* [SS] 2021-01-25 */
+   done = 1;
+   };
+
   if (done == 0 && quiet == -1) {    /* [SS] 2013-11-02 */
-    sprintf(buff, "instruction !%s! ignored", s);
+    snprintf(buff, MAXLINE, "instruction !%s! ignored", s);
+    /* [KG] 2022-01-13 static overflow */
     event_warning(buff);
   };
 }
@@ -5036,6 +5130,10 @@ if (gfact_method)  applygrace_orig(place);
 else applygrace_new(place);
 }
 
+static void cleargracenotes(int start,int end) {
+removefeatures(start,end);
+} /* [SS]  2021-01-24 */
+
 
 static void applygrace_orig(place)
 int place;
@@ -5081,6 +5179,10 @@ int place;
   nextinchord = 0;
   hostnotestart = -1;
   while ((hostnotestart == -1) && (j < notes)) {
+    if (feature[j] == SINGLE_BAR || feature[j] == DOUBLE_BAR) {
+                              cleargracenotes(start,end); /* [SS] 2021.01.24 */
+                              return;
+                             }      
     if ((feature[j] == NOTE) || (feature[j] == REST)) {
       hostnotestart = j;
     };
@@ -5144,7 +5246,6 @@ int place;
   };
 }
 
-
 static void applygrace_new(place)
 int place;
 /* assign lengths to grace notes before generating MIDI */
@@ -5163,7 +5264,9 @@ int place;
   int nextinchord;
   int hostnotestart, hostnoteend;
   int  adjusted_num, adjusted_den;
+  int notesinchord;
 
+  notesinchord = -1;
   j = place;
   start = -1;
   while ((j < notes) && (start == -1)) {
@@ -5190,6 +5293,10 @@ int place;
   nextinchord = 0;
   hostnotestart = -1;
   while ((hostnotestart == -1) && (j < notes)) {
+    if (feature[j] == SINGLE_BAR || feature[j] == DOUBLE_BAR) {
+                              cleargracenotes(start,end);
+                              return;
+                             } /* [SS] 2021-01-24 */    
     if ((feature[j] == NOTE) || (feature[j] == REST)) {
       hostnotestart = j;
     };
@@ -5221,11 +5328,26 @@ int place;
     grace_denom = 1;
     p = start;
     while (p <= end) {
-      if ((feature[p] == NOTE) || (feature[p] == REST)) {
-        grace_num = grace_num * denom[p] + grace_denom * num[p];
-        grace_denom = grace_denom * denom[p];
-        reduce(&grace_num, &grace_denom);
-      };
+      switch(feature[p]) { /* [SS] 2021-03-30 */
+      case NOTE:
+      case REST:
+        if (notesinchord <= 0) {
+           /* if chordal grace note, only count the first note */
+           grace_num = grace_num * denom[p] + grace_denom * num[p];
+           grace_denom = grace_denom * denom[p];
+           reduce(&grace_num, &grace_denom);
+           if (notesinchord == 0) notesinchord++;
+           }
+        break; 
+      case CHORDON:
+        notesinchord = 0;
+        break;
+      case CHORDOFF:
+        notesinchord = -1;
+        break;
+     default:
+        break;
+     }
       p = p + 1;
     };
 
@@ -5813,19 +5935,20 @@ static void headerprocess()
   voicesused = 0;
 }
 
-void event_key(sharps, s, modeindex, modmap, modmul, modmicrotone, gotkey, gotclef, clefname,
+void event_key(sharps, s, modeindex, modmap, modmul, modmicrotone, gotkey, gotclef, clefname, clef,
           octave, transpose, gotoctave, gottranspose, explict)
 /* handles a K: field */
 int sharps; /* sharps is number of sharps in key signature */
-int modeindex; /* 0 major, 1,2,3 minor, 4 locrian, etc.  */
 char *s; /* original string following K: */
+int modeindex; /* 0 major, 1,2,3 minor, 4 locrian, etc.  */
 char modmap[7]; /* array of accidentals to be applied */
 int  modmul[7]; /* array giving multiplicity of each accent (1 or 2) */
 struct fraction modmicrotone[7]; /* [SS] 2014-01-06 */
 int gotkey, gotclef;
+char* clefname;
+cleftype_t *clef;  /* [JA] 2020-10-19 */
 int octave, transpose, gotoctave, gottranspose;
 int explict;
-char* clefname;
 {
   int minor;
   minor =0;
@@ -5849,13 +5972,24 @@ char* clefname;
       copymap(&global);
       sf = sharps;
       mi = minor;
-      headerprocess();
 
-      v = getvoicecontext(1);
-      if (!inbody) v1index = notes; /* save position in case of split voice */
-    };
+      /* [SS] 2021-06-24 
+      ***headerprocess();
+
+      ***v = getvoicecontext(1);
+      ***if (!inbody) v1index = notes; /* save position in case of split voice */
+ 
+    if (gotclef)
+    {
+      event_octave(clef->octave_offset, 0);
+    }
     if (gotoctave) {
       event_octave(octave,0);
+    };
+    /* [SS] 2021-06-24 */
+    headerprocess();
+    v = getvoicecontext(1);
+    if (!inbody) v1index = notes; /* save position in case of split voice */
     };
   };
 }
@@ -5904,7 +6038,7 @@ for (i=0;i<notes;i++) {
   j = feature[i];
   if (j == MUSICLINE) {
      insertfeature(DOUBLE_BAR,0,0,0,i+1);
-     voicestart[0] = i+1;
+     voicestart[0] = i+1; 
      break;
      }
   }
@@ -5917,14 +6051,15 @@ for (i=0;i<notes;i++) {
                  }
   if (j == VOICE) {
         voicenum = pitch[i];
-        if(!voicestart[voicenum]) voicestart[voicenum] = i;
+        if(!voicestart[voicenum]) {
+          voicestart[voicenum] = i;
+          /*printf("voicestart[%d] = %d\n",voicenum,voicestart[voicenum]);*/
+          }
         }
   if (j == BAR_REP) bar_rep_found[voicenum] = 1;
   if ((j == REP_BAR || j == DOUBLE_REP) && (!bar_rep_found[voicenum])) {
     /* printf("missing BAR_REP for voice inserted for voice %d part %c\n",voicenum,part); [SS] 2011-04-19 */
-     /*** add_leftrepeat_at[num2add] = voicestart[voicenum]+3; [SS] 2009-12-20*/
-     /***add_leftrepeat_at[num2add] = voicestart[voicenum]+2; /* [SS] 2009-12-20*/
-     add_leftrepeat_at[num2add] = voicestart[voicenum]+1; /* [SS] 2014-10-31*/
+     add_leftrepeat_at[num2add] = voicestart[voicenum]; /* [SS] 2014-10-31 2021-12-21*/
      num2add++;
      bar_rep_found[voicenum] = 1;
      }
@@ -5936,10 +6071,19 @@ if (verbose >3) printf("scan_for_missing_repeats finished\n");
 
 
 void add_missing_repeats () {
-int i,j;
+int i,j,k;
+int leftrepeat;
 for (i = num2add-1; i >= 0; i--) {
- insertfeature(BAR_REP,0,0,0,add_leftrepeat_at[i]); 
- /*for (j=0;j<parts;j++) {*/
+leftrepeat = add_leftrepeat_at[i];
+k=0;
+/* [SS] 2021-12-21 */
+if (voicesused) { /* 2021-02-21 */
+while (feature[leftrepeat] != VOICE && k < 20) {
+  leftrepeat++; 
+  k++;
+  }
+}
+ insertfeature(BAR_REP,0,0,0,leftrepeat+1); 
  /* for (j=0;j<=parts;j++) {   [SS] 2011-06-06 */
  for (j=0;j<26;j++) {  /* [SS] 2011-08-03 */
    if (part_start[j] > add_leftrepeat_at[i])

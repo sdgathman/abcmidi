@@ -1,11 +1,12 @@
 abcMIDI :   abc <-> MIDI conversion utilities
 
-midi2abc version 3.46 June 22 2020
-abc2midi version 4.38 July 05 2020
-abc2abc  version 2.08 June 04 2020
-yaps     version 1.77 June 04 2020
-abcmatch version 1.73 June 04 2020
-midicopy version 1.36 June 04 2019
+midi2abc version 3.58 December 09 2022
+abc2midi version 4.76 August 01 2022
+abc2abc  version 2.18 June 14 2022
+yaps     version 1.90 June 14 2022
+abcmatch version 1.82 June 14 2022
+midicopy version 1.38 May 06 2022
+midistats version 0.58 December 09 2022
 
 24th January 2002
 
@@ -14,7 +15,7 @@ J.R.Allwright@westminster.ac.uk
 University of Westminster,
 London, UK
 
-February 2020
+October 2021
 
 Seymour Shlien
 Ottawa, Canada
@@ -440,6 +441,12 @@ midicopy copies selected tracks, channels, time interval of the input midi file.
 -focusontrack n1,n2,... 
 -focusonchannel n1,n2,...
 -attenuation n
+-nobends
+-indrums n1,n2,... (drums to include)
+-xdrums n1,n2,... (drums to exclude)
+-onlydrums (only channel 10)
+-nodrums (exlcude channel 10)
+-zerochannels  set all channel numbers to zero
 
 
 midicopy.exe -ver

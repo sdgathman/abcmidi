@@ -52,7 +52,7 @@
 
 
 
-#define VERSION "1.36 June 04 2020 midicopy"
+#define VERSION "1.38 May 05 2022 midicopy"
 #include "midicopy.h"
 #define NULLFUNC 0
 #define NULL 0
@@ -112,6 +112,9 @@ int chosen_drum = 0;		/* [SS] 2013-10-01 */
 int drumvelocity = 0;		/* [SS] 2013-10-01 */
 int attenuation = 70;           /* [SS] 2017-11-27 */
 int nobends = 0;                /* [SS] 2017-12-15 */
+int nopressure = 0;             /* [SS] 2022-05-05 */
+int nocntrl = 0;                /* [SS] 2022-05-05 */
+int zerochannels = 0;           /* [SS] 2020-10-09 */
 
 long Mf_numbyteswritten = 0L;
 long readvarinum ();
@@ -384,7 +387,7 @@ copy_metatext (int type, int length, char *m)
 }
 
 void
-copy_timesig (c1, c2, c3, c4)
+midicopy_timesig (c1, c2, c3, c4)
 int c1, c2, c3, c4;
 {
   char data[4];
@@ -995,7 +998,7 @@ metaevent (int type)
       mf_write_meta_event (0x54, m, 5);
       break;
     case 0x58:
-      copy_timesig (m[0], m[1], m[2], m[3]);
+      midicopy_timesig (m[0], m[1], m[2], m[3]);
       break;
     case 0x59:
       copy_keysig (m[0], m[1]);
@@ -1025,6 +1028,7 @@ void
 chanmessage (int status, int c1, int c2)
 {
   int chan = status & 0xf;
+  if (zerochannels) chan = 0; /* [SS] 2020-10-09 */
   haschannel[chan] = 1;
 
   if (!cut_beginning ())
@@ -1058,9 +1062,10 @@ chanmessage (int status, int c1, int c2)
 	copy_noteon (chan, c1, c2);
 	break;
       case 0xa0:
-	copy_pressure (chan, c1, c2);
+        if (nopressure == 0) copy_pressure (chan, c1, c2);
 	break;
       case 0xb0:
+        if (nocntrl == 0)
 	copy_parameter (chan, c1, c2);
 	break;
       case 0xe0:
@@ -1071,7 +1076,7 @@ chanmessage (int status, int c1, int c2)
 	copy_program (chan, c1);
 	break;
       case 0xd0:
-	copy_chanpressure (chan, c1);
+        if (nopressure == 0) copy_chanpressure (chan, c1);
 	break;
       }
    }
@@ -1849,10 +1854,13 @@ main (int argc, char *argv[])
       printf ("-focusonchannels n1,n2,...\n"); /* [SS] 2017-11-27 */
       printf ("-attenuation n\n"); /* [SS] 2017-11-27 */
       printf ("-nobends\n"); /* [SS] 2017-11-27 */
+      printf ("-nopressure\n"); /* [SS] 2022-05-05 */
+      printf ("-nocntrl\n"); /* [SS] 2022-05-05 */
       printf ("-indrums n1,n2,... (drums to include)\n"); /* [SS] 2019-12-22 */
       printf ("-xdrums n1,n2,... (drums to exclude)\n"); /* [SS] 2019-12-22 */
       printf ("-onlydrums (only channel 10)\n"); /* [SS] 2019-12-22 */
-      printf ("-nodrums (exlcude channel 10)\n"); /* [SS] 2019-12-22 */
+      printf ("-nodrums (exclude channel 10)\n"); /* [SS] 2019-12-22 */
+      printf ("-zerochannels  set all channel numbers to zero\n"); /* [SS] 2020-10-09 */
       exit (1);
     }
 
@@ -2088,6 +2096,12 @@ main (int argc, char *argv[])
   arg = getarg("-nobends",argc,argv);
   if (arg >=0) nobends=1;
 
+  /* [SS] 2022-05-05 */
+  arg = getarg("-nopressure",argc,argv);
+  if (arg >=0) nopressure=1;
+
+  arg = getarg("-nocntrl",argc,argv);
+  if (arg >=0) nocntrl = 1;
 
   repflag = getarg ("-replace", argc, argv);
   if (repflag >= 0)
@@ -2136,6 +2150,9 @@ main (int argc, char *argv[])
 
   arg = getarg("-nodrums",argc,argv); /* [SS] 2019-12-22 */
   if (arg >=0) ctocopy[9] = 0;     
+
+  arg = getarg("-zerochannels",argc,argv); /* [SS] 2020-10-09 */
+  if (arg >=0) zerochannels = 1;
 
   F_in = fopen (argv[argc - 2], "rb");
   if (F_in == NULL)

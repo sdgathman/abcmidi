@@ -7,6 +7,8 @@
 /* The voice data structure also holds various state variables */
 /* to allow processing of voice data as it is read in */
 
+#include "music_utils.h"
+
 enum tail_type {nostem, single, startbeam, midbeam, endbeam};
 
 /* holds a fraction */
@@ -102,7 +104,11 @@ struct feature {
   featuretype type;
   float xleft, xright, ydown, yup;
   float x;
-  void* item;
+  /* [JA] 2020-10-27 */
+  union {
+    void *voidptr;
+    int number;
+  }item;
 };
 
 /* structure used by both slurs and ties */
@@ -112,13 +118,7 @@ struct slurtie {
   int crossline;
 };  
 
-enum cleftype {noclef, treble, soprano, mezzo, alto, tenor, baritone, bass};
 enum linestate {header, midline, newline};
-
-struct aclef {
-  enum cleftype type;
-  int octave;
-};
 
 /* holds calculated vertical spacing for one stave line */
 /* associated with PRINTLINE */
@@ -151,7 +151,6 @@ struct voice {
   struct fract barcount;
   int barno;
   int barchecking;
-  int expect_repeat;
   int brokentype, brokenmult, brokenpending;
   int tiespending;
   struct feature* tie_place[MAX_TIES];
@@ -177,14 +176,15 @@ struct voice {
   float tuple_height;
   /* variables for assigning syllables to notes */
   struct feature* linestart;
+  struct feature* lyrics_end;
   struct feature* lineend;
   struct chord* thischord;
   struct feature* chordplace;
   enum linestate line;
   /* following fields are initially inherited from tune */
-  struct aclef* clef;
+  cleftype_t* clef;
   struct key* keysig;
-  struct fract meter;
+  timesig_details_t timesig;
   struct atempo* tempo;
   /* place used while printing to keep track of progress through voice */
   struct feature* lineplace;
@@ -209,14 +209,14 @@ struct tune {
   char* origin;
   char* parts;
   struct llist notes;
-  struct fract meter;
+  timesig_details_t timesig;
   int barchecking;
   struct key* keysig;
   struct atempo* tempo;
   struct llist voices;
   struct voice* cv;
   struct fract unitlen;
-  struct aclef clef;
+  cleftype_t clef;
   struct llist words;
 };
 
